@@ -1,0 +1,70 @@
+# Statische Ketten-Blocklist fuer Vienna Lead-Gen.
+# Matching: case-insensitive, Umlaute gestripped, substring-match auf slugify(name).
+# Dynamische Chain-Heuristik: siehe src/pipeline/chainfilter.ts
+# Manuelle Overrides werden in DB-Tabelle `chain_overrides` persistiert.
+
+chains:
+  retail:
+    - billa
+    - spar
+    - hofer
+    - penny
+    - lidl
+    - dm
+    - bipa
+    - müller
+    - thalia
+    - libro
+    - h&m
+    - zara
+    - uniqlo
+    - c&a
+    - deichmann
+    - peek & cloppenburg
+    - kik
+    - takko
+    - new yorker
+    - humanic
+    - leder & schuh
+    - intersport
+    - hervis
+    - media markt
+    - saturn
+    - hartlauer
+    - pagro
+    - tedi
+    - action
+
+  gastronomy:
+    - starbucks
+    - mcdonald's
+    - burger king
+    - kfc
+    - subway
+    - vapiano
+    - l'osteria
+    - nordsee
+    - bäckerei ströck
+    - ströck
+    - anker
+    - le crobag
+    - bäckerei felber
+    - felber
+    - mann bäckerei
+    - joseph brot
+    - aida
+
+  other:
+    - hofer reisen
+    - tui
+    - neckermann
+    - dertour
+    - hervis
+    - fressnapf
+    - obi
+    - hornbach
+    - bauhaus
+    - ikea
+    - xxxlutz
+    - kika
+    - leiner

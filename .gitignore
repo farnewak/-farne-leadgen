@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.local
+runs/*.db
+runs/*.db-journal
+runs/*.db-wal
+runs/*.db-shm
+runs/raw/
+dashboard/.next/
+dashboard/node_modules/
+*.log
+.DS_Store
