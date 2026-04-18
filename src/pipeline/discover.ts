@@ -1,5 +1,5 @@
 import type { PlaceCandidate, Industry } from "../models/types.js";
-import { searchVienna } from "../tools/google-maps.js";
+import { getActiveSources } from "../tools/datasources/registry.js";
 import { classifyIndustry } from "./classify.js";
 import { makeLogger } from "../lib/logger.js";
 
@@ -42,6 +42,9 @@ export async function discoverLeads(
   const seen = new Map<string, DiscoveredLead>();
   const plzSuffix = input.plz ? ` ${input.plz} Wien` : " Wien";
 
+  const sources = getActiveSources();
+  const perSourceContribution = new Map<string, number>();
+
   for (const seed of SEED_QUERIES) {
     if (seen.size >= input.maxLeads) break;
 
@@ -49,21 +52,41 @@ export async function discoverLeads(
     const perSeedBudget = Math.min(20, Math.ceil(remaining * 1.5));
 
     log.info(`seed "${seed.q}" → budget ${perSeedBudget}, seen ${seen.size}`);
-    const places = await searchVienna({
-      query: `${seed.q}${plzSuffix}`,
-      maxResults: perSeedBudget,
-      plzFilter: input.plz,
-    });
 
-    for (const p of places) {
-      if (seen.has(p.placeId)) continue;
-      const industry = classifyIndustry(p.types, p.primaryType);
-      seen.set(p.placeId, { ...p, industry });
+    for (const source of sources) {
       if (seen.size >= input.maxLeads) break;
+
+      const places = await source.search({
+        query: `${seed.q}${plzSuffix}`,
+        maxResults: perSeedBudget,
+        plzFilter: input.plz,
+      });
+
+      let added = 0;
+      for (const p of places) {
+        if (seen.has(p.placeId)) continue;
+        const industry = classifyIndustry(p.types, p.primaryType);
+        seen.set(p.placeId, { ...p, industry });
+        added += 1;
+        if (seen.size >= input.maxLeads) break;
+      }
+      if (added > 0) {
+        perSourceContribution.set(
+          source.id,
+          (perSourceContribution.get(source.id) ?? 0) + added,
+        );
+        log.debug(`source ${source.id}: +${added} new leads for "${seed.q}"`);
+      }
     }
   }
 
   const out = Array.from(seen.values()).slice(0, input.maxLeads);
-  log.info(`discovered ${out.length} leads${input.plz ? ` in ${input.plz}` : ""}`);
+  const breakdown = Array.from(perSourceContribution.entries())
+    .map(([id, n]) => `${id}=${n}`)
+    .join(", ");
+  log.info(
+    `discovered ${out.length} leads${input.plz ? ` in ${input.plz}` : ""}` +
+      (breakdown ? ` [${breakdown}]` : ""),
+  );
   return out;
 }
