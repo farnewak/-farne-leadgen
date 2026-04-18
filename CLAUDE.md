@@ -93,6 +93,14 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
     und recomputed gefüllt (siehe `rowToExportShape` in
     `src/pipeline/export.ts`). Bei Migration: Inference-Block entfernen
     und Spalte in `rebuildScoreInput()` verdrahten.
+23. [RESOLVED IN THIS PR] Discovery-Resilience: per-seed Source-Fallback
+    in `src/pipeline/discover.ts`. Bei Overpass-504/Timeout/beliebiger
+    Exception einer Source fällt die Pipeline jetzt auf die nächste
+    registrierte Source zurück (Priority-Reihenfolge). Vorher killte ein
+    einzelner OSM-Ausfall den ganzen Audit-Run (3× beobachtet am
+    2026-04-18 Samstag-Abend). Zusätzlich: `OVERPASS_URL` env-var support
+    in `osm-overpass.ts` für Tests und Mirror-Override (alias zu
+    `OVERPASS_ENDPOINT`).
 
 ## Was NICHT tun
 

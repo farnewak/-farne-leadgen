@@ -49,7 +49,9 @@ function parseIntEnv(raw: string | undefined, fallback: number): number {
 function loadConfig(): OsmConfig {
   const e = process.env;
   return {
-    endpoint: e.OVERPASS_ENDPOINT ?? DEFAULTS.endpoint,
+    // OVERPASS_URL is the canonical override (used by CLI smoke tests);
+    // OVERPASS_ENDPOINT is kept as a legacy alias.
+    endpoint: e.OVERPASS_URL ?? e.OVERPASS_ENDPOINT ?? DEFAULTS.endpoint,
     userAgent: e.OVERPASS_USER_AGENT ?? DEFAULTS.userAgent,
     maxRequestsPerRun: parseIntEnv(
       e.OVERPASS_MAX_REQUESTS_PER_RUN,
