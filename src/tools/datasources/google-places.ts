@@ -28,14 +28,14 @@ const FIELD_MASK = [
   "nextPageToken",
 ].join(",");
 
-interface RawPlace {
+export interface RawPlace {
   id: string;
   displayName?: { text: string };
   formattedAddress?: string;
   addressComponents?: Array<{
-    longText: string;
-    shortText: string;
-    types: string[];
+    longText?: string;
+    shortText?: string;
+    types?: string[];
   }>;
   location?: { latitude: number; longitude: number };
   types?: string[];
@@ -115,8 +115,16 @@ export async function searchVienna(
   return dedupeByPlaceId(results);
 }
 
-function toCandidate(p: RawPlace): PlaceCandidate | null {
+export function toCandidate(p: RawPlace): PlaceCandidate | null {
   if (!p.id || !p.displayName?.text) return null;
+  const lat = p.location?.latitude;
+  const lng = p.location?.longitude;
+  if (typeof lat !== "number" || typeof lng !== "number") {
+    // Without coordinates the candidate is useless for downstream
+    // chain-filter / dedup / visualization. Drop it.
+    log.warn(`dropping place ${p.id}: no location`);
+    return null;
+  }
   const plz = extractPlz(p);
   return {
     placeId: p.id,
@@ -128,16 +136,19 @@ function toCandidate(p: RawPlace): PlaceCandidate | null {
     primaryType: p.primaryType ?? null,
     website: p.websiteUri ?? null,
     phone: p.internationalPhoneNumber ?? p.nationalPhoneNumber ?? null,
-    lat: p.location?.latitude ?? 0,
-    lng: p.location?.longitude ?? 0,
+    lat,
+    lng,
   };
 }
 
-function extractPlz(p: RawPlace): string | null {
-  const comp = p.addressComponents?.find((c) => c.types.includes("postal_code"));
-  if (comp?.longText && /^1\d{3}$/.test(comp.longText)) return comp.longText;
+// Wien-PLZ strict: nur 1xx0 (1010..1230 + 1300/1400/1500 Sonderfälle).
+// /^1\d{3}$/ würde 1121/1232 etc. akzeptieren, die es in Wien nicht gibt.
+// Konsistent zu src/tools/datasources/osm-overpass.ts.
+export function extractPlz(p: RawPlace): string | null {
+  const comp = p.addressComponents?.find((c) => c.types?.includes("postal_code"));
+  if (comp?.longText && /^1\d{2}0$/.test(comp.longText)) return comp.longText;
   // Fallback: regex on the formatted address
-  const m = p.formattedAddress?.match(/\b(1\d{3})\b/);
+  const m = p.formattedAddress?.match(/\b(1\d{2}0)\b/);
   return m?.[1] ?? null;
 }
 
