@@ -3,6 +3,7 @@ import type { PlaceCandidate } from "../../src/models/types.js";
 import type { DataSource, DataSourceSearchOptions } from "../../src/tools/datasources/types.js";
 import { selectActive } from "../../src/tools/datasources/registry.js";
 import { googlePlacesSource } from "../../src/tools/datasources/google-places.js";
+import { resetEnvCache } from "../../src/lib/env.js";
 
 function makeMockSource(overrides: Partial<DataSource> = {}): DataSource {
   return {
@@ -15,18 +16,24 @@ function makeMockSource(overrides: Partial<DataSource> = {}): DataSource {
 }
 
 describe("googlePlacesSource.isConfigured", () => {
-  const originalKey = process.env.GOOGLE_MAPS_API_KEY;
+  // Clear both unified + legacy aliases; googleApiKey() walks all three.
+  // resetEnvCache() so the next loadEnv() sees the cleared state.
+  const originalUnified = process.env.GOOGLE_API_KEY;
+  const originalMaps = process.env.GOOGLE_MAPS_API_KEY;
+  const originalPsi = process.env.PAGESPEED_API_KEY;
 
   beforeEach(() => {
+    delete process.env.GOOGLE_API_KEY;
     delete process.env.GOOGLE_MAPS_API_KEY;
+    delete process.env.PAGESPEED_API_KEY;
+    resetEnvCache();
   });
 
   afterEach(() => {
-    if (originalKey === undefined) {
-      delete process.env.GOOGLE_MAPS_API_KEY;
-    } else {
-      process.env.GOOGLE_MAPS_API_KEY = originalKey;
-    }
+    if (originalUnified !== undefined) process.env.GOOGLE_API_KEY = originalUnified;
+    if (originalMaps !== undefined) process.env.GOOGLE_MAPS_API_KEY = originalMaps;
+    if (originalPsi !== undefined) process.env.PAGESPEED_API_KEY = originalPsi;
+    resetEnvCache();
   });
 
   it("returns false when GOOGLE_MAPS_API_KEY is missing", () => {
@@ -35,6 +42,7 @@ describe("googlePlacesSource.isConfigured", () => {
 
   it("returns true when GOOGLE_MAPS_API_KEY is set", () => {
     process.env.GOOGLE_MAPS_API_KEY = "test-key";
+    resetEnvCache();
     expect(googlePlacesSource.isConfigured()).toBe(true);
   });
 

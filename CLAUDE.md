@@ -63,24 +63,37 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 ## Offene Arbeitspakete (Reihenfolge)
 
 1. DataSource-Abstraction — DONE für google-places + osm-overpass.
+   audit_results-Tabelle DONE. Discovery/Signals/Scoring/Orchestrator
+   DONE (B1–B4 auf feat/audit-pipeline).
    Offen: wko.ts (Phase 2), herold verworfen (AGB/§76c), firmenbuch →
    separater Enrichment-Step, kein DataSource.
-2. `src/pipeline/audit.ts` — Website-Audit (SSL, Mobile-Viewport, PSI API,
-   Tech-Stack, Impressum, Ladezeit)
-3. `src/pipeline/score.ts` — Gewichtungsmodell → score
+2. `src/pipeline/audit.ts` — Orchestrator DONE (B4)
+3. `src/pipeline/score.ts` — Gewichtungsmodell DONE (B4)
 4. `src/pipeline/persist.ts` — writeSnapshot mit 500kB-Budget
-5. `src/cli.ts` — CLI-Entry (`leadgen discover --plz 1070 --max 100`)
-6. `src/cli/export-csv.ts` — Export sortiert nach score
+5. `src/cli/` — CLI-Entry DONE für `audit`, Stub für `discover`/`export` (B4)
+6. `src/cli/export.ts` — CSV-Export-Stub (B4). Finales Schreiben offen → #11
 7. `src/pipeline/chainfilter.ts` — dynamische Ketten-Heuristik
 8. OSM Discovery-Mode (quarterly): explorative Tag-Queries ohne
    Value-Filter (`nwr[shop](area.wien);`, `nwr[amenity](area.wien);` …),
    Value-Histogramme schreiben, manuell auf neue Kategorien sichten,
    `OSM_TAG_TO_GPLACES_KEY` entsprechend erweitern.
+9. (reserved)
+10. Feature-Branch `feat/audit-pipeline` — ready for merge review.
+    B1–B4 done, 234 Tests grün, tsc clean.
+11. CSV-Export CLI (`leadgen export`) — Stub; finale CSV-Schreibe + Filter
+    (sort by score DESC, PLZ-filter, tier-filter) offen.
+12. Scoring-Weights Tuning nach erstem Real-Run (≥200 Tier-A-Candidates).
+13. PSI-Partial-Refresh: nur PSI neu holen wenn Static fresh aber PSI stale.
+    Aktuell wird bei psi-stale der ganze Static-Pfad neu durchlaufen.
+14. CSE-basiertes B1/B2-Tier-Mining: wenn Discovery keine eigene Website
+    findet aber CSE-Treffer auf Social/Directory-Hosts liefert, Tier B1/B2
+    statt B3 vergeben (aktuell pauschal B3).
 
 ## Was NICHT tun
 
-- Keine Google-API-Calls ohne expliziten Check auf `GOOGLE_MAPS_API_KEY`.
-  In v0.1 bleibt Google optional; Herold/WKO sind Default.
+- Keine Google-API-Calls ohne expliziten Check via `googleApiKey()` aus
+  `src/lib/env.ts` (resolved `GOOGLE_API_KEY` → legacy Aliase).
+  In v0.1 bleibt Google optional; OSM/WKO sind Default.
 - Keine `npm audit fix --force` ohne Review — bricht oft mehr als es fixt.
 - Keine direkten Imports aus `schema.sqlite.ts` oder `schema.pg.ts` in
   App-Code; immer via `schema.ts` re-export.

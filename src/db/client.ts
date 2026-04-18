@@ -40,3 +40,10 @@ export function isPostgres(): boolean {
   const url = process.env.DATABASE_URL ?? "";
   return url.startsWith("postgres://") || url.startsWith("postgresql://");
 }
+
+// Test-only: forces the next getDb() call to reopen the connection.
+// Used by the integration test to swap DATABASE_URL between fixtures.
+// Do NOT call from production code.
+export function __resetDbClientForTests(): void {
+  cached = null;
+}

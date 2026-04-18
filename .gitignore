@@ -7,6 +7,7 @@ runs/*.db-wal
 runs/*.db-shm
 runs/raw/
 runs/overpass-cache/
+tests/tmp/
 dashboard/.next/
 dashboard/node_modules/
 *.log

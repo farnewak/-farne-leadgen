@@ -1,5 +1,6 @@
 import type { PlaceCandidate } from "../../models/types.js";
 import { districtFromPlz } from "../../lib/normalize.js";
+import { googleApiKey } from "../../lib/env.js";
 import { makeLogger } from "../../lib/logger.js";
 import type { DataSource, DataSourceSearchOptions } from "./types.js";
 
@@ -58,8 +59,8 @@ export interface DiscoverOptions {
 export async function searchVienna(
   opts: DiscoverOptions,
 ): Promise<PlaceCandidate[]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) throw new Error("GOOGLE_MAPS_API_KEY not set");
+  const apiKey = googleApiKey();
+  if (!apiKey) throw new Error("GOOGLE_API_KEY (or legacy alias) not set");
 
   const maxResults = opts.maxResults ?? 20;
   const results: PlaceCandidate[] = [];
@@ -159,7 +160,7 @@ export const googlePlacesSource: DataSource = {
   id: "google-places",
   label: "Google Places",
   isConfigured(): boolean {
-    return !!process.env.GOOGLE_MAPS_API_KEY;
+    return !!googleApiKey();
   },
   search(opts: DataSourceSearchOptions): Promise<PlaceCandidate[]> {
     return searchVienna({

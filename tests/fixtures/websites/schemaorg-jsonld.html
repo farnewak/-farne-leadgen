@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <title>Beispiel Restaurant</title>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Restaurant",
+      "name": "Beispiel Restaurant",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Hauptstr. 1",
+        "addressLocality": "Wien",
+        "postalCode": "1030"
+      },
+      "telephone": "+43 1 234 5678"
+    }
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "WebSite", "url": "https://example.at" },
+        { "@type": "BreadcrumbList", "itemListElement": [] }
+      ]
+    }
+  </script>
+</head>
+<body><h1>Beispiel Restaurant</h1></body>
+</html>
