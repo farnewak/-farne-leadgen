@@ -34,7 +34,7 @@ export function normName(input: string): string {
 }
 
 export function districtFromPlz(plz: string | null): string | null {
-  if (!plz || !/^1\d{3}$/.test(plz)) return null;
+  if (!plz || !/^1\d{2}0$/.test(plz)) return null;
   const n = Number(plz.slice(1, 3));
   if (n < 1 || n > 23) return null;
   return String(n).padStart(2, "0");

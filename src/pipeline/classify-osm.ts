@@ -1,9 +1,9 @@
 // OSM-tag ("{key}={value}") → Google-Places primary-type key.
 // Feed the result into classifyIndustry() for the industry bucket.
 //
-// IMPORTANT: Do NOT extend this map ad-hoc. Gaps surface via the
-// unmapped-tags.log telemetry (see osm-overpass.ts); review that log,
-// then curate additions in a dedicated commit.
+// IMPORTANT: Do NOT extend this map ad-hoc. Run a quarterly Discovery-Mode
+// pass (explorative nwr[key](area.wien) queries without value filter) to
+// surface new categories, then curate additions in a dedicated commit.
 export const OSM_TAG_TO_GPLACES_KEY: Readonly<Record<string, string>> = {
   // gastronomy
   "amenity=restaurant": "restaurant",

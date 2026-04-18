@@ -72,9 +72,10 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 5. `src/cli.ts` — CLI-Entry (`leadgen discover --plz 1070 --max 100`)
 6. `src/cli/export-csv.ts` — Export sortiert nach score
 7. `src/pipeline/chainfilter.ts` — dynamische Ketten-Heuristik
-8. OSM unmapped-tags Review — `runs/overpass-cache/unmapped-tags.log`
-   nach jedem Run sichten, häufige Tag-Kombis ins
-   `OSM_TAG_TO_GPLACES_KEY` nachziehen.
+8. OSM Discovery-Mode (quarterly): explorative Tag-Queries ohne
+   Value-Filter (`nwr[shop](area.wien);`, `nwr[amenity](area.wien);` …),
+   Value-Histogramme schreiben, manuell auf neue Kategorien sichten,
+   `OSM_TAG_TO_GPLACES_KEY` entsprechend erweitern.
 
 ## Was NICHT tun
 

@@ -1,6 +1,6 @@
 import type { PlaceCandidate } from "../../models/types.js";
 import { makeLogger } from "../../lib/logger.js";
-import { OSM_TAG_TO_GPLACES_KEY, findOsmTagKey } from "../../pipeline/classify-osm.js";
+import { OSM_TAG_TO_GPLACES_KEY } from "../../pipeline/classify-osm.js";
 import type { DataSource, DataSourceSearchOptions } from "./types.js";
 import {
   ageDays,
@@ -13,7 +13,6 @@ import {
 } from "./osm-overpass-cache.js";
 import {
   elementToCandidate,
-  logUnmappedTag,
   type OverpassElement,
   type OverpassResponse,
 } from "./osm-overpass-mapping.js";
@@ -199,25 +198,12 @@ export const osmOverpassSource: DataSource = {
     const query = buildOverpassQuery(cfg.timeoutSeconds);
     const elements = await fetchViaCache(query, cfg);
     const out: PlaceCandidate[] = [];
-    let unmapped = 0;
     for (const el of elements) {
       const c = elementToCandidate(el);
-      if (c) {
-        out.push(c);
-        continue;
-      }
-      if (
-        (el.tags?.name ?? el.tags?.brand) &&
-        findOsmTagKey(el.tags ?? {}) === null
-      ) {
-        unmapped += 1;
-        await logUnmappedTag(cfg.cacheDir, el);
-      }
+      if (c) out.push(c);
     }
     hasDelivered = true;
-    log.info(
-      `delivered ${out.length} Vienna candidates (unmapped dropped: ${unmapped})`,
-    );
+    log.info(`delivered ${out.length} Vienna candidates`);
     return out;
   },
 };
