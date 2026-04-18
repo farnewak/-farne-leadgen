@@ -24,6 +24,13 @@ export const SCORING_WEIGHTS = {
   PSI_EXCELLENT: -1,
 } as const;
 
+export type ScoreWeightKey = keyof typeof SCORING_WEIGHTS;
+
+export interface BreakdownEntry {
+  key: ScoreWeightKey;
+  delta: number;
+}
+
 // Tech-stack CMS identifiers considered "budget-tier" for outreach purposes.
 // Wix/Jimdo sites are cheaper to migrate and more likely to need our help —
 // they're a positive signal, not a negative judgement of the tool itself.
@@ -43,55 +50,74 @@ export interface ScoreInput {
   hasStructuredData: boolean;
 }
 
+// Returns the list of signals that contributed to the score, in the same
+// order they were evaluated. Used both by computeScore() (sum + clamp) and
+// by the CSV exporter (human-readable breakdown column).
+//
 // INVARIANT: For Tier B1/B2/B3/C, NO signal logic applies. The tier bucket
 // itself is the signal — without a reachable website, signal values are
 // unreliable and would mix apples/oranges with Tier-A scores.
-export function computeScore(input: ScoreInput): number {
-  let s = 0;
+export function scoreBreakdown(input: ScoreInput): BreakdownEntry[] {
+  const out: BreakdownEntry[] = [];
+  const push = (key: ScoreWeightKey): void => {
+    out.push({ key, delta: SCORING_WEIGHTS[key] });
+  };
 
   if (input.tier === "B3") {
-    s += SCORING_WEIGHTS.NO_WEBSITE;
-  } else if (input.tier === "C") {
-    s += SCORING_WEIGHTS.DEAD_WEBSITE;
-  } else if (input.tier === "B1") {
-    s += SCORING_WEIGHTS.ONLY_SOCIAL;
-  } else if (input.tier === "B2") {
-    s += SCORING_WEIGHTS.ONLY_DIRECTORY;
-  } else if (input.tier === "A") {
-    if (input.sslValid === false) s += SCORING_WEIGHTS.NO_SSL;
-    if (input.httpToHttpsRedirect === false) s += SCORING_WEIGHTS.NO_HTTPS_REDIRECT;
-    if (input.hasViewportMeta === false) s += SCORING_WEIGHTS.NO_MOBILE_VIEWPORT;
-
-    // PSI bucket thresholds chosen to match Google's own labels:
-    //   <50 = "Poor" (red), 50–74 = "Needs improvement" (orange),
-    //   75–85 = "Good" but unremarkable (neutral),
-    //   >85 = "Excellent" (green) — actively penalise our own lead score.
-    const p = input.psiMobilePerformance;
-    if (p !== null) {
-      if (p < 50) s += SCORING_WEIGHTS.PSI_POOR;
-      else if (p < 75) s += SCORING_WEIGHTS.PSI_MEDIUM;
-      else if (p > 85) s += SCORING_WEIGHTS.PSI_EXCELLENT;
-    }
-
-    if (!input.impressumPresent) {
-      s += SCORING_WEIGHTS.NO_IMPRESSUM;
-    } else if (input.impressumComplete === false) {
-      s += SCORING_WEIGHTS.IMPRESSUM_INCOMPLETE;
-    }
-    if (input.impressumPresent && !input.impressumUid) {
-      s += SCORING_WEIGHTS.NO_UID;
-    }
-
-    if (input.techStack.cms.some((c) => BUDGET_CMS.has(c.toLowerCase()))) {
-      s += SCORING_WEIGHTS.WIX_OR_JIMDO;
-    }
-    if (input.techStack.analytics.length === 0) s += SCORING_WEIGHTS.NO_ANALYTICS;
-    if (input.techStack.tracking.length === 0) s += SCORING_WEIGHTS.NO_MODERN_TRACKING;
-    if (Object.keys(input.socialLinks).length === 0) s += SCORING_WEIGHTS.NO_SOCIAL_LINKS;
-    if (input.hasStructuredData) s += SCORING_WEIGHTS.HAS_STRUCTURED_DATA;
+    push("NO_WEBSITE");
+    return out;
+  }
+  if (input.tier === "C") {
+    push("DEAD_WEBSITE");
+    return out;
+  }
+  if (input.tier === "B1") {
+    push("ONLY_SOCIAL");
+    return out;
+  }
+  if (input.tier === "B2") {
+    push("ONLY_DIRECTORY");
+    return out;
   }
 
+  // Tier A — evaluate every signal.
+  if (input.sslValid === false) push("NO_SSL");
+  if (input.httpToHttpsRedirect === false) push("NO_HTTPS_REDIRECT");
+  if (input.hasViewportMeta === false) push("NO_MOBILE_VIEWPORT");
+
+  // PSI bucket thresholds chosen to match Google's own labels:
+  //   <50 = "Poor" (red), 50–74 = "Needs improvement" (orange),
+  //   75–85 = "Good" but unremarkable (neutral),
+  //   >85 = "Excellent" (green) — actively penalise our own lead score.
+  const p = input.psiMobilePerformance;
+  if (p !== null) {
+    if (p < 50) push("PSI_POOR");
+    else if (p < 75) push("PSI_MEDIUM");
+    else if (p > 85) push("PSI_EXCELLENT");
+  }
+
+  if (!input.impressumPresent) {
+    push("NO_IMPRESSUM");
+  } else if (input.impressumComplete === false) {
+    push("IMPRESSUM_INCOMPLETE");
+  }
+  if (input.impressumPresent && !input.impressumUid) push("NO_UID");
+
+  if (input.techStack.cms.some((c) => BUDGET_CMS.has(c.toLowerCase()))) {
+    push("WIX_OR_JIMDO");
+  }
+  if (input.techStack.analytics.length === 0) push("NO_ANALYTICS");
+  if (input.techStack.tracking.length === 0) push("NO_MODERN_TRACKING");
+  if (Object.keys(input.socialLinks).length === 0) push("NO_SOCIAL_LINKS");
+  if (input.hasStructuredData) push("HAS_STRUCTURED_DATA");
+
+  return out;
+}
+
+export function computeScore(input: ScoreInput): number {
+  const entries = scoreBreakdown(input);
+  const sum = entries.reduce((acc, e) => acc + e.delta, 0);
   // Clamp: unbounded score would make sorting brittle when weights are tuned;
   // 0..30 keeps the CSV-export column comfortable and leaves room at the top.
-  return Math.max(0, Math.min(30, s));
+  return Math.max(0, Math.min(30, sum));
 }

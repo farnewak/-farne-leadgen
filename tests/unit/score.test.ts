@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   computeScore,
+  scoreBreakdown,
   SCORING_WEIGHTS,
   type ScoreInput,
 } from "../../src/pipeline/score.js";
-import type { TechStackSignals, SocialLinks } from "../../src/models/audit.js";
+import type {
+  TechStackSignals,
+  SocialLinks,
+  Tier,
+} from "../../src/models/audit.js";
 
 const emptyTech: TechStackSignals = {
   cms: [],
@@ -145,5 +150,64 @@ describe("computeScore — PSI buckets", () => {
     const a = computeScore(base({ psiMobilePerformance: null }));
     const b = computeScore(base({ psiMobilePerformance: 80 }));
     expect(a).toBe(b);
+  });
+});
+
+describe("scoreBreakdown — invariant with computeScore", () => {
+  const TIERS: Tier[] = ["A", "B1", "B2", "B3", "C"];
+
+  function pick<T>(arr: readonly T[], rnd: () => number): T {
+    return arr[Math.floor(rnd() * arr.length)]!;
+  }
+
+  // Deterministic PRNG: mulberry32. Property tests should be reproducible —
+  // a flake at 1-in-1000 rate is still a test-suite liability.
+  function seededRand(seed: number): () => number {
+    let t = seed >>> 0;
+    return () => {
+      t = (t + 0x6d2b79f5) >>> 0;
+      let x = t;
+      x = Math.imul(x ^ (x >>> 15), x | 1);
+      x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function randomInput(rnd: () => number): ScoreInput {
+    const cmsPool = ["wix", "wordpress", "jimdo", "joomla", "custom"];
+    const psiChoices: Array<number | null> = [null, 10, 49, 50, 74, 75, 85, 86, 99];
+    const social: SocialLinks = rnd() < 0.5 ? {} : { facebook: "https://facebook.com/x" };
+    const tech: TechStackSignals = {
+      cms: rnd() < 0.5 ? [] : [pick(cmsPool, rnd)],
+      pageBuilder: [],
+      analytics: rnd() < 0.5 ? [] : ["ga"],
+      tracking: rnd() < 0.5 ? [] : ["fb-pixel"],
+      payment: [],
+      cdn: [],
+    };
+    return {
+      tier: pick(TIERS, rnd),
+      sslValid: rnd() < 0.5 ? false : true,
+      httpToHttpsRedirect: rnd() < 0.5 ? false : true,
+      hasViewportMeta: rnd() < 0.5 ? false : true,
+      psiMobilePerformance: pick(psiChoices, rnd),
+      impressumPresent: rnd() < 0.5,
+      impressumComplete: rnd() < 0.5 ? false : true,
+      impressumUid: rnd() < 0.5 ? null : "ATU12345678",
+      techStack: tech,
+      socialLinks: social,
+      hasStructuredData: rnd() < 0.5,
+    };
+  }
+
+  it("sum(breakdown.delta) clamped to [0,30] equals computeScore for 20 random inputs", () => {
+    const rnd = seededRand(20260418);
+    for (let i = 0; i < 20; i++) {
+      const input = randomInput(rnd);
+      const breakdown = scoreBreakdown(input);
+      const sum = breakdown.reduce((acc, e) => acc + e.delta, 0);
+      const clamped = Math.max(0, Math.min(30, sum));
+      expect(clamped).toBe(computeScore(input));
+    }
   });
 });

@@ -88,6 +88,11 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 14. CSE-basiertes B1/B2-Tier-Mining: wenn Discovery keine eigene Website
     findet aber CSE-Treffer auf Social/Directory-Hosts liefert, Tier B1/B2
     statt B3 vergeben (aktuell pauschal B3).
+22. Schema-Migration `has_structured_data` (bool) auf `audit_results` —
+    aktuell via Export-Time-Inference aus dem score-gap zwischen stored
+    und recomputed gefüllt (siehe `rowToExportShape` in
+    `src/pipeline/export.ts`). Bei Migration: Inference-Block entfernen
+    und Spalte in `rebuildScoreInput()` verdrahten.
 
 ## Was NICHT tun
 
