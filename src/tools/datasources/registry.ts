@@ -5,9 +5,15 @@ import { osmOverpassSource } from "./osm-overpass.js";
 
 const log = makeLogger("registry");
 
-// Central list of all known sources. New sources (WKO, …) get registered
-// here once implemented.
-const ALL_SOURCES: readonly DataSource[] = [googlePlacesSource, osmOverpassSource];
+// Central list of all known sources, ordered by priority for the
+// per-seed fallback in src/pipeline/discover.ts. OSM is free + covers
+// all Vienna in one dump, so it runs first; Google Places fills in when
+// OSM is down or rate-limited (CLAUDE.md: "OSM/WKO sind Default").
+// New sources (WKO, …) get registered here once implemented.
+export const ALL_SOURCES: readonly DataSource[] = [
+  osmOverpassSource,
+  googlePlacesSource,
+];
 
 // Pure filter — exposed for tests so no process.env manipulation is needed.
 // Logs per-source status and throws if nothing is active.

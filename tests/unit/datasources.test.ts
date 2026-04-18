@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { PlaceCandidate } from "../../src/models/types.js";
 import type { DataSource, DataSourceSearchOptions } from "../../src/tools/datasources/types.js";
-import { selectActive } from "../../src/tools/datasources/registry.js";
+import { selectActive, ALL_SOURCES } from "../../src/tools/datasources/registry.js";
 import { googlePlacesSource } from "../../src/tools/datasources/google-places.js";
 import { resetEnvCache } from "../../src/lib/env.js";
 
@@ -84,5 +84,15 @@ describe("selectActive", () => {
 
   it("throws when given an empty source list", () => {
     expect(() => selectActive([])).toThrow(/No DataSource configured/);
+  });
+});
+
+describe("ALL_SOURCES priority order", () => {
+  // Pins the registry-priority used by discover.ts's per-seed fallback.
+  // Flipping this order silently would switch the primary data source
+  // for the whole pipeline; the test forces the change to be explicit.
+  it("puts osm-overpass at index 0 (primary) and google-places at index 1", () => {
+    expect(ALL_SOURCES[0]?.id).toBe("osm-overpass");
+    expect(ALL_SOURCES[1]?.id).toBe("google-places");
   });
 });
