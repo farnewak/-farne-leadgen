@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import type { TechStackSignals, SocialLinks } from "../models/audit.js";
 
 // `leads.id` is a generic opaque string, NOT named google_place_id by design.
 // Convention: Google-sourced leads use the raw place_id; other sources use a
@@ -88,6 +90,76 @@ export const chainOverrides = sqliteTable("chain_overrides", {
   createdAt: integer("created_at").notNull(),
 });
 
+// `audit_results` is the per-website audit snapshot. One row per place_id;
+// re-audits UPSERT via the unique index. `tier` / `discovery_method` are
+// enforced by Drizzle at type-level and by CHECK constraints at DB-level —
+// the migration duplicates the enums because Drizzle's SQLite driver does
+// not emit CHECKs from the `enum:` type hint.
+//
+// JSON columns store typed payloads. The `$type<T>()` hint is narrative only;
+// app-side code MUST go through zod parsers (src/models/audit.ts) on read.
+export const auditResults = sqliteTable(
+  "audit_results",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    placeId: text("place_id").notNull().unique(),
+    auditedAt: integer("audited_at", { mode: "timestamp_ms" }).notNull(),
+    tier: text("tier", { enum: ["A", "B1", "B2", "B3", "C"] }).notNull(),
+    discoveredUrl: text("discovered_url"),
+    discoveryMethod: text("discovery_method", {
+      enum: ["osm-tag", "gplaces-tag", "dns-probe", "cse", "manual"],
+    }),
+    sslValid: integer("ssl_valid", { mode: "boolean" }),
+    sslExpiresAt: integer("ssl_expires_at", { mode: "timestamp_ms" }),
+    httpToHttpsRedirect: integer("http_to_https_redirect", { mode: "boolean" }),
+    hasViewportMeta: integer("has_viewport_meta", { mode: "boolean" }),
+    viewportMetaContent: text("viewport_meta_content"),
+    psiMobilePerformance: integer("psi_mobile_performance"),
+    psiMobileSeo: integer("psi_mobile_seo"),
+    psiMobileAccessibility: integer("psi_mobile_accessibility"),
+    psiMobileBestPractices: integer("psi_mobile_best_practices"),
+    psiFetchedAt: integer("psi_fetched_at", { mode: "timestamp_ms" }),
+    impressumUrl: text("impressum_url"),
+    impressumPresent: integer("impressum_present", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    impressumUid: text("impressum_uid"),
+    impressumCompanyName: text("impressum_company_name"),
+    impressumAddress: text("impressum_address"),
+    impressumPhone: text("impressum_phone"),
+    impressumEmail: text("impressum_email"),
+    impressumComplete: integer("impressum_complete", { mode: "boolean" }),
+    techStack: text("tech_stack", { mode: "json" })
+      .$type<TechStackSignals>()
+      .notNull()
+      .default(sql`'{}'`),
+    genericEmails: text("generic_emails", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    socialLinks: text("social_links", { mode: "json" })
+      .$type<SocialLinks>()
+      .notNull()
+      .default(sql`'{}'`),
+    fetchError: text("fetch_error"),
+    fetchErrorAt: integer("fetch_error_at", { mode: "timestamp_ms" }),
+    staticSignalsExpiresAt: integer("static_signals_expires_at", {
+      mode: "timestamp_ms",
+    }).notNull(),
+    psiSignalsExpiresAt: integer("psi_signals_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    score: integer("score"),
+  },
+  (t) => ({
+    tierIdx: index("idx_audit_tier").on(t.tier),
+    scoreIdx: index("idx_audit_score").on(t.score),
+    staticExpiresIdx: index("idx_audit_static_expires").on(
+      t.staticSignalsExpiresAt,
+    ),
+  }),
+);
+
 export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type Snapshot = typeof snapshots.$inferSelect;
@@ -95,3 +167,5 @@ export type NewSnapshot = typeof snapshots.$inferInsert;
 export type Run = typeof runs.$inferSelect;
 export type NewRun = typeof runs.$inferInsert;
 export type ChainOverride = typeof chainOverrides.$inferSelect;
+export type AuditResult = typeof auditResults.$inferSelect;
+export type NewAuditResult = typeof auditResults.$inferInsert;

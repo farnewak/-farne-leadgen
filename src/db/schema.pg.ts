@@ -1,4 +1,15 @@
-import { pgTable, text, integer, bigint, jsonb, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  integer,
+  bigint,
+  boolean,
+  jsonb,
+  timestamp,
+  serial,
+  index,
+} from "drizzle-orm/pg-core";
+import type { TechStackSignals, SocialLinks } from "../models/audit.js";
 
 // Mirrors schema.sqlite.ts 1:1. Kept in sync manually until v0.2 consolidation.
 // Intentionally uses text for JSON columns (app-side (de)serialize) to keep
@@ -88,3 +99,86 @@ export const chainOverrides = pgTable("chain_overrides", {
   note: text("note"),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
+
+// Postgres mirror of src/db/schema.sqlite.ts:auditResults.
+// Diffs vs. SQLite: SERIAL id, TIMESTAMPTZ for timestamps, native BOOLEAN
+// and JSONB. FK to leads(id) stays app-enforced; the audit row can exist
+// ahead of lead discovery in edge cases (manual re-audit of a purged lead).
+export const auditResults = pgTable(
+  "audit_results",
+  {
+    id: serial("id").primaryKey(),
+    placeId: text("place_id").notNull().unique(),
+    auditedAt: timestamp("audited_at", { withTimezone: true, mode: "date" })
+      .notNull(),
+    tier: text("tier", { enum: ["A", "B1", "B2", "B3", "C"] }).notNull(),
+    discoveredUrl: text("discovered_url"),
+    discoveryMethod: text("discovery_method", {
+      enum: ["osm-tag", "gplaces-tag", "dns-probe", "cse", "manual"],
+    }),
+    sslValid: boolean("ssl_valid"),
+    sslExpiresAt: timestamp("ssl_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    httpToHttpsRedirect: boolean("http_to_https_redirect"),
+    hasViewportMeta: boolean("has_viewport_meta"),
+    viewportMetaContent: text("viewport_meta_content"),
+    psiMobilePerformance: integer("psi_mobile_performance"),
+    psiMobileSeo: integer("psi_mobile_seo"),
+    psiMobileAccessibility: integer("psi_mobile_accessibility"),
+    psiMobileBestPractices: integer("psi_mobile_best_practices"),
+    psiFetchedAt: timestamp("psi_fetched_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    impressumUrl: text("impressum_url"),
+    impressumPresent: boolean("impressum_present").notNull().default(false),
+    impressumUid: text("impressum_uid"),
+    impressumCompanyName: text("impressum_company_name"),
+    impressumAddress: text("impressum_address"),
+    impressumPhone: text("impressum_phone"),
+    impressumEmail: text("impressum_email"),
+    impressumComplete: boolean("impressum_complete"),
+    techStack: jsonb("tech_stack")
+      .$type<TechStackSignals>()
+      .notNull()
+      .default({
+        cms: [],
+        pageBuilder: [],
+        analytics: [],
+        tracking: [],
+        payment: [],
+        cdn: [],
+      }),
+    genericEmails: jsonb("generic_emails")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    socialLinks: jsonb("social_links")
+      .$type<SocialLinks>()
+      .notNull()
+      .default({}),
+    fetchError: text("fetch_error"),
+    fetchErrorAt: timestamp("fetch_error_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    staticSignalsExpiresAt: timestamp("static_signals_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    psiSignalsExpiresAt: timestamp("psi_signals_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    score: integer("score"),
+  },
+  (t) => ({
+    tierIdx: index("idx_audit_tier").on(t.tier),
+    scoreIdx: index("idx_audit_score").on(t.score),
+    staticExpiresIdx: index("idx_audit_static_expires").on(
+      t.staticSignalsExpiresAt,
+    ),
+  }),
+);

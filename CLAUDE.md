@@ -63,6 +63,8 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 ## Offene Arbeitspakete (Reihenfolge)
 
 1. DataSource-Abstraction — DONE für google-places + osm-overpass.
+   audit_results-Tabelle DONE (Prompt B1). Discovery/Signals/Scoring
+   offen (Prompts B2–B4 auf feat/audit-pipeline).
    Offen: wko.ts (Phase 2), herold verworfen (AGB/§76c), firmenbuch →
    separater Enrichment-Step, kein DataSource.
 2. `src/pipeline/audit.ts` — Website-Audit (SSL, Mobile-Viewport, PSI API,
@@ -76,11 +78,15 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
    Value-Filter (`nwr[shop](area.wien);`, `nwr[amenity](area.wien);` …),
    Value-Histogramme schreiben, manuell auf neue Kategorien sichten,
    `OSM_TAG_TO_GPLACES_KEY` entsprechend erweitern.
+9. (reserved)
+10. Feature-Branch `feat/audit-pipeline`: B1 (Foundation-Layer — Schema,
+    Env, Models) done, B2–B4 (Discovery, Signals, Scoring) pending.
 
 ## Was NICHT tun
 
-- Keine Google-API-Calls ohne expliziten Check auf `GOOGLE_MAPS_API_KEY`.
-  In v0.1 bleibt Google optional; Herold/WKO sind Default.
+- Keine Google-API-Calls ohne expliziten Check via `googleApiKey()` aus
+  `src/lib/env.ts` (resolved `GOOGLE_API_KEY` → legacy Aliase).
+  In v0.1 bleibt Google optional; OSM/WKO sind Default.
 - Keine `npm audit fix --force` ohne Review — bricht oft mehr als es fixt.
 - Keine direkten Imports aus `schema.sqlite.ts` oder `schema.pg.ts` in
   App-Code; immer via `schema.ts` re-export.
