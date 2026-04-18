@@ -62,7 +62,9 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 
 ## Offene Arbeitspakete (Reihenfolge)
 
-1. DataSource-Abstraction: `src/tools/datasources/{herold,wko,firmenbuch}.ts`
+1. DataSource-Abstraction — DONE für google-places + osm-overpass.
+   Offen: wko.ts (Phase 2), herold verworfen (AGB/§76c), firmenbuch →
+   separater Enrichment-Step, kein DataSource.
 2. `src/pipeline/audit.ts` — Website-Audit (SSL, Mobile-Viewport, PSI API,
    Tech-Stack, Impressum, Ladezeit)
 3. `src/pipeline/score.ts` — Gewichtungsmodell → score
@@ -70,6 +72,9 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 5. `src/cli.ts` — CLI-Entry (`leadgen discover --plz 1070 --max 100`)
 6. `src/cli/export-csv.ts` — Export sortiert nach score
 7. `src/pipeline/chainfilter.ts` — dynamische Ketten-Heuristik
+8. OSM unmapped-tags Review — `runs/overpass-cache/unmapped-tags.log`
+   nach jedem Run sichten, häufige Tag-Kombis ins
+   `OSM_TAG_TO_GPLACES_KEY` nachziehen.
 
 ## Was NICHT tun
 

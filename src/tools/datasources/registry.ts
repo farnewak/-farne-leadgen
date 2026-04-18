@@ -1,12 +1,13 @@
 import { makeLogger } from "../../lib/logger.js";
 import type { DataSource } from "./types.js";
 import { googlePlacesSource } from "./google-places.js";
+import { osmOverpassSource } from "./osm-overpass.js";
 
 const log = makeLogger("registry");
 
-// Central list of all known sources. New sources (Herold, WKO, Firmenbuch)
-// get registered here once implemented.
-const ALL_SOURCES: readonly DataSource[] = [googlePlacesSource];
+// Central list of all known sources. New sources (WKO, …) get registered
+// here once implemented.
+const ALL_SOURCES: readonly DataSource[] = [googlePlacesSource, osmOverpassSource];
 
 // Pure filter — exposed for tests so no process.env manipulation is needed.
 // Logs per-source status and throws if nothing is active.
@@ -23,7 +24,7 @@ export function selectActive(sources: readonly DataSource[]): DataSource[] {
 
   if (active.length === 0) {
     throw new Error(
-      "No DataSource configured. Set GOOGLE_MAPS_API_KEY or enable another source (Herold/WKO/Firmenbuch).",
+      "No DataSource configured. Set GOOGLE_MAPS_API_KEY or enable another source (OSM Overpass, WKO).",
     );
   }
 
