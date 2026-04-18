@@ -24,6 +24,17 @@ export const FETCH_ERRORS = [
   "CERT_INVALID",
   "SSL_HANDSHAKE",
   "CONNECTION_REFUSED",
+  // PSI / upstream-API specific classifications. Added in B4: the PSI
+  // integration distinguishes quota exhaustion from auth failure from
+  // transient 5xx so retry policy and DB negative-cache can differ.
+  "RATE_LIMITED",
+  "AUTH_ERROR",
+  "QUOTA_EXCEEDED",
+  "SERVER_ERROR",
+  "CLIENT_ERROR",
+  // robots.txt disallow for the discovered URL path. Tier stays A but the
+  // signals layer is skipped to honour the site's stated crawl policy.
+  "ROBOTS_DISALLOWED",
   "UNKNOWN",
 ] as const;
 export type FetchError = (typeof FETCH_ERRORS)[number];

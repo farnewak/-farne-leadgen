@@ -86,9 +86,13 @@ describe("enum tuples", () => {
     ]);
   });
 
-  it("FETCH_ERRORS is the exact 9-tuple", () => {
-    expect(FETCH_ERRORS.length).toBe(9);
+  it("FETCH_ERRORS contains both transport and upstream-API codes", () => {
+    // B1 defined the 9 transport codes; B4 added 6 upstream-API/robots codes.
+    // Assert presence rather than exact length so future additions don't
+    // force churn here — the concrete codes are what matter downstream.
     expect(FETCH_ERRORS).toContain("DNS_FAIL");
     expect(FETCH_ERRORS).toContain("UNKNOWN");
+    expect(FETCH_ERRORS).toContain("RATE_LIMITED");
+    expect(FETCH_ERRORS).toContain("ROBOTS_DISALLOWED");
   });
 });
