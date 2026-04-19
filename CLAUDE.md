@@ -179,6 +179,48 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
       Re-Klassifikation zu Tier A, CLOSED_PERMANENTLY-Drop,
       Quota-Skip, No-Match, Cache-Hit auf zweitem Aufruf,
       OSM-Priority bei Phone/Address-Merge.
+27. [RESOLVED IN THIS PR] Aggressiver Impressum-Scraper (P0 Contact-
+    Coverage). Zielkanäle sind Cold Mail + Cold Call + Persönlicher
+    Besuch — jeder Lead braucht Phone + Email + Address. Umsetzung:
+    - Neue Module `src/tools/enrich/email-extract.ts` und
+      `src/tools/enrich/impressum-scraper.ts`.
+    - Email-Extraction mit Deobfuscation (HTML-Entities &#64;/&#x40;,
+      "[at]"/"(at)"/"(ät)"/"[æt]", "[dot]"/"(dot)") + mailto:-Hrefs.
+      Noise-Filter strikt nur für technische Mails (noreply/webmaster/
+      postmaster/abuse/admin@wordpress.org + example.com/test.com/
+      domain.tld). Rollen-Mails (info@, office@, kontakt@, buero@, …)
+      bleiben IM Output, werden aber hinter personalisierte Adressen
+      sortiert (`prioritizeEmails`).
+    - Scraper probiert /impressum, /imprint, /kontakt, /contact,
+      /legal, /about, /ueber-uns; erster 200-OK gewinnt. Plus Footer-
+      Link-Discovery auf der Home-Seite. Hartes Budget: 8 s Total-
+      Deadline, 5 s/Request, max 3 Pages pro Domain.
+    - Phone-Normalisierung zu E.164 via libphonenumber-js (Region AT);
+      tel:-Hrefs haben Vorrang vor Body-Regex.
+    - Wien-PLZ-Strict (1010..1230 Step 10) als Address-Quality-Gate:
+      Nicht-Wien-PLZ → Adresse wird NICHT übernommen (I5).
+    - Per-Domain File-Cache in `runs/impressum-cache/<sha256(host)>`,
+      TTL 7 Tage (`IMPRESSUM_CACHE_TTL_DAYS`).
+    - Robots.txt fail-closed: bei Disallow kein Request,
+      `robotsBlocked=true` im Ergebnis. User-Agent
+      `farne-leadgen/1.0 (Wien local business research)`.
+    - Wiring in `src/pipeline/enrich.ts` als `enrichImpressumContacts`
+      (nach B3-Enrichment). `src/pipeline/audit.ts` ruft den Scraper
+      für jeden Candidate mit Website; Phone/Address werden mit
+      OSM-Priorität in den Candidate gemerged, E-Mail + UID +
+      companyName füllen Lücken in der Tier-A `ImpressumData`.
+    - Neue Export-Column `coverage` ("P"/"E"/"A"/"PE"/"PA"/"EA"/
+      "PEA"/""): Union der vorhandenen Kanäle pro Row. Treibt
+      Outreach-Targeting ("≥PEA ist bereit für alle drei Kanäle").
+    - 46 neue Unit-Tests: 25 für Email-Deobfuscation +
+      Noise-Filter-Matrix, 21 für Scraper (5 Wien-Impressum-Fixtures
+      für Anwalt/Ingenieur/Gastro/Einzelhandel/Handwerker, E.164-
+      Matrix, PLZ-Quality-Gate, Cache-Hit, Robots-Disallow,
+      Page-Cap, UA-Check, Coverage-Flag).
+    - Neue env vars: `IMPRESSUM_SCRAPER_ENABLED` (Default true),
+      `IMPRESSUM_CACHE_DIR` (./runs/impressum-cache),
+      `IMPRESSUM_CACHE_TTL_DAYS` (7).
+    - Neue Dependency: `libphonenumber-js` für E.164-Parsing.
 
 ## Was NICHT tun
 

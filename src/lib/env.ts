@@ -88,6 +88,11 @@ const envSchema = z.object({
   GOOGLE_PLACES_DAILY_QUOTA: z.coerce.number().int().min(0).default(5000),
   PLACES_CACHE_DIR: z.string().default("./runs/places-cache"),
   PLACES_CACHE_TTL_DAYS: z.coerce.number().int().min(0).default(30),
+
+  // --- Impressum scraper (contact-coverage P0) ---
+  IMPRESSUM_SCRAPER_ENABLED: boolEnvField("true"),
+  IMPRESSUM_CACHE_DIR: z.string().default("./runs/impressum-cache"),
+  IMPRESSUM_CACHE_TTL_DAYS: z.coerce.number().int().min(0).default(7),
 });
 
 export type EnvT = z.infer<typeof envSchema>;
