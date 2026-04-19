@@ -49,6 +49,9 @@ export interface AuditRunOptions {
   limit?: number;
   forceRefresh?: boolean;
   onlyTier?: Tier | null;
+  // When set, discovery is scoped to this Vienna PLZ (e.g. "1030"). Null
+  // keeps the historical Wien-wide behaviour.
+  plz?: string | null;
   // Optional hook for tests: replaces the default discoverLeads() call.
   // Production callers pass undefined.
   discover?: (limit: number) => Promise<PlaceCandidate[]>;
@@ -72,10 +75,15 @@ export interface AuditRunOptions {
 // swallow per-candidate failures. One bad lead never aborts the run.
 export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
   const limit = options.limit ?? 100;
+  const plz = options.plz ?? null;
   const candidates = options.discover
     ? await options.discover(limit)
-    : await discoverLeads({ plz: null, maxLeads: limit });
-  log.info(`audit starting on ${candidates.length} candidates (limit=${limit})`);
+    : await discoverLeads({ plz, maxLeads: limit });
+  log.info(
+    `audit starting on ${candidates.length} candidates (limit=${limit}` +
+      (plz ? `, plz=${plz}` : "") +
+      `)`,
+  );
 
   let done = 0;
   const tasks = candidates.map((c) =>
