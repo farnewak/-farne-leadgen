@@ -221,6 +221,42 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
       `IMPRESSUM_CACHE_DIR` (./runs/impressum-cache),
       `IMPRESSUM_CACHE_TTL_DAYS` (7).
     - Neue Dependency: `libphonenumber-js` für E.164-Parsing.
+28. [RESOLVED IN THIS PR] `--bezirk` Flag für Bezirk-First-Strategie (P0).
+    Macht einen vollständigen Bezirk-Audit (statt Wien-weitem Seed-Scan)
+    möglich — Voraussetzung für geplante Walk-In-Routen und fokussierte
+    Cold-Outreach-Kampagnen pro Grätzl. Umsetzung:
+    - Neue Datei `data/wien-bezirke.json` mit allen 23 Bezirken
+      (number, name, plz, center lat/lng).
+    - Neues Modul `src/tools/geo/bezirk.ts` mit `resolveBezirk()`
+      und `allBezirke()`. Eingabe akzeptiert PLZ ("1010"–"1230"),
+      Nummer ("1"–"23") und Name ("Innere Stadt"/"Landstraße", case-
+      und umlaut-insensitiv). Normalisierung auf PLZ als Canonical.
+    - `src/cli/audit.ts` parst `--bezirk` und setzt
+      `AuditRunOptions.plz`. Unbekannte Eingabe → `process.exit(1)`
+      mit Fehler-Message (spec §C I6). Ohne Flag → unverändertes
+      Wien-weites Verhalten (I3).
+    - `src/pipeline/audit.ts` reicht `plz` an `discoverLeads()`
+      durch. `discoverLeads` passt es schon vorher via
+      `DataSourceSearchOptions.plzFilter` an alle Sources weiter.
+    - `src/tools/datasources/osm-overpass.ts`:
+      `buildOverpassQuery(timeout, plz?)` schaltet das Area-Scope um
+      von `area["name"="Wien"]…->.wien` auf
+      `area["postal_code"="<plz>"]->.bezirk` + `(area.bezirk)` in
+      allen nwr-Statements (spec I2). Zusätzlich Second-Line-Guard
+      im Source: Candidates mit abweichender `addr:postcode` werden
+      gedroppt. Unterschiedliche plz → eigener Cache-Eintrag pro
+      Bezirk.
+    - `src/cli/export.ts` akzeptiert `--bezirk` und setzt damit
+      (a) die Default-`--plz` Filter auf den Bezirks-PLZ und
+      (b) den Default-Filename auf `leads_<plz>_<date>.csv|json`
+      (spec I4). Explizites `--plz` überschreibt den Bezirks-Filter.
+    - 13 neue Tests: 9 Unit-Tests für Resolver
+      (`tests/unit/bezirk.test.ts`: PLZ/Number/Name-Matrix inkl.
+      Umlaut- und Case-Insensitivity, alle 23 Bezirke, Reject 99/
+      unknown), 4 Integration-Tests in
+      `tests/integration/bezirk-scope.test.ts`
+      (plzFilter-Propagierung an Sources, Regression-Guard für
+      Wien-weit, Query-Scope-Switch in `buildOverpassQuery`).
 
 ## Was NICHT tun
 

@@ -10,6 +10,7 @@ import {
   type ExportRow,
 } from "../pipeline/export.js";
 import { TIERS, type Tier } from "../models/audit.js";
+import { resolveBezirk } from "../tools/geo/bezirk.js";
 import {
   getArg,
   getBoolArg,
@@ -37,6 +38,9 @@ Usage:
 
 Options:
   --output <path>        Output file. Default: runs/leads-<date>.(csv|json)
+                         With --bezirk: runs/leads_<plz>_<date>.(csv|json).
+  --bezirk <id>          Filter by district (PLZ 1010-1230, number 1-23, or
+                         name like "Landstraße"). Sets --plz if not given.
   --tier <T>             Filter by tier (repeatable). Allowed: ${TIERS.join(",")}.
                          Omit for all tiers.
   --plz 1010,1020        Comma-separated Vienna PLZs. Omit for all.
@@ -60,11 +64,26 @@ export function parseExportArgs(argv: string[]): ExportCliOptions {
     throw new Error(`invalid --format: ${format} (allowed: csv|json)`);
   }
 
+  // --bezirk narrows both the plz filter and the default filename (§C I4).
+  // Invalid input throws — mirrors the audit CLI's exit-1 contract.
+  const bezirkRaw = getArg("--bezirk", argv);
+  let bezirkPlz: string | null = null;
+  if (bezirkRaw !== null && bezirkRaw !== "") {
+    const b = resolveBezirk(bezirkRaw);
+    if (!b) {
+      throw new Error(
+        `invalid --bezirk: ${bezirkRaw} (expected PLZ 1010-1230, number 1-23, or name)`,
+      );
+    }
+    bezirkPlz = b.plz;
+  }
+
   const outputRaw = getArg("--output", argv);
+  const defaultOutput = bezirkPlz
+    ? `runs/leads_${bezirkPlz}_${isoDate()}.${format}`
+    : `runs/leads-${isoDate()}.${format}`;
   const output =
-    outputRaw && outputRaw.length > 0
-      ? outputRaw
-      : `runs/leads-${isoDate()}.${format}`;
+    outputRaw && outputRaw.length > 0 ? outputRaw : defaultOutput;
 
   const tierRaw = getRepeatableArg("--tier", argv);
   for (const t of tierRaw) {
@@ -75,13 +94,15 @@ export function parseExportArgs(argv: string[]): ExportCliOptions {
   const tiers = tierRaw.length > 0 ? (tierRaw as Tier[]) : null;
 
   const plzRaw = getArg("--plz", argv);
-  const plzList =
+  const explicitPlzList =
     plzRaw && plzRaw.length > 0
       ? plzRaw
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s.length > 0)
       : null;
+  // --plz wins when both are given; otherwise --bezirk drives the filter.
+  const plzList = explicitPlzList ?? (bezirkPlz ? [bezirkPlz] : null);
 
   const minScore = getNumberArg("--min-score", argv) ?? 0;
   const maxScore = getNumberArg("--max-score", argv) ?? 30;

@@ -64,16 +64,27 @@ function loadConfig(): OsmConfig {
   };
 }
 
-export function buildOverpassQuery(timeoutSeconds: number): string {
+export function buildOverpassQuery(
+  timeoutSeconds: number,
+  plz: string | null = null,
+): string {
+  // When a bezirk is requested the search scope is narrowed from the
+  // Wien-wide admin boundary to a postal-code relation (spec §C I2).
+  // Each bezirk gets its own cache entry because the query string differs
+  // — that is deliberate: one bezirk-run never evicts another's cache.
+  const scope = plz ? "bezirk" : "wien";
+  const scopeDef = plz
+    ? `area["postal_code"="${plz}"]->.bezirk;\n`
+    : `area["name"="Wien"]["boundary"="administrative"]["admin_level"="4"]->.wien;\n`;
   const statements = Object.keys(OSM_TAG_TO_GPLACES_KEY)
     .map((kv) => {
       const [k, v] = kv.split("=");
-      return `  nwr["${k}"="${v}"](area.wien);`;
+      return `  nwr["${k}"="${v}"](area.${scope});`;
     })
     .join("\n");
   return (
     `[out:json][timeout:${timeoutSeconds}];\n` +
-    `area["name"="Wien"]["boundary"="administrative"]["admin_level"="4"]->.wien;\n` +
+    scopeDef +
     `(\n${statements}\n);\n` +
     `out tags center;\n`
   );
@@ -194,18 +205,26 @@ export const osmOverpassSource: DataSource = {
     // available; configuration is tuning, not gating.
     return true;
   },
-  async search(_opts: DataSourceSearchOptions): Promise<PlaceCandidate[]> {
+  async search(opts: DataSourceSearchOptions): Promise<PlaceCandidate[]> {
     if (hasDelivered) return [];
     const cfg = loadConfig();
-    const query = buildOverpassQuery(cfg.timeoutSeconds);
+    const plz = opts.plzFilter ?? null;
+    const query = buildOverpassQuery(cfg.timeoutSeconds, plz);
     const elements = await fetchViaCache(query, cfg);
     const out: PlaceCandidate[] = [];
     for (const el of elements) {
       const c = elementToCandidate(el);
-      if (c) out.push(c);
+      if (!c) continue;
+      // Second-line guard: even with a PLZ-scoped query, OSM boundaries
+      // can clip elements whose `addr:postcode` belongs to a neighbour.
+      // Enforce the user-requested bezirk strictly.
+      if (plz && c.plz !== plz) continue;
+      out.push(c);
     }
     hasDelivered = true;
-    log.info(`delivered ${out.length} Vienna candidates`);
+    log.info(
+      `delivered ${out.length} candidates${plz ? ` (plz=${plz})` : " (Vienna)"}`,
+    );
     return out;
   },
 };
