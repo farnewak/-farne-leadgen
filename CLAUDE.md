@@ -93,7 +93,7 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
     und recomputed gefüllt (siehe `rowToExportShape` in
     `src/pipeline/export.ts`). Bei Migration: Inference-Block entfernen
     und Spalte in `rebuildScoreInput()` verdrahten.
-23. [RESOLVED IN THIS PR] Discovery-Resilience: per-seed Source-Fallback
+23. [RESOLVED] Discovery-Resilience: per-seed Source-Fallback
     in `src/pipeline/discover.ts`. Bei Overpass-504/Timeout/beliebiger
     Exception einer Source fällt die Pipeline jetzt auf die nächste
     registrierte Source zurück (Priority-Reihenfolge). Vorher killte ein
@@ -101,6 +101,18 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
     2026-04-18 Samstag-Abend). Zusätzlich: `OVERPASS_URL` env-var support
     in `osm-overpass.ts` für Tests und Mirror-Override (alias zu
     `OVERPASS_ENDPOINT`).
+24. [RESOLVED IN THIS PR] Präziser Filialketten-Filter (P0). B2C-
+    Massenmarkt-Ketten (Supermärkte, Drogerien, Fast-Food, Tankstellen,
+    Mobilfunk, Bank) werden in `src/tools/filters/chain-filter.ts`
+    gedropt. Premium-Einzelbetriebe und Enterprise-Branchen bleiben via
+    **Whitelist-Vorrang** IMMER drin (shop=jewelry/watches/antiques/art/
+    gallery/boutique/interior_decoration/musical_instrument, office=
+    lawyer/notary/engineer/architect/accountant/tax_advisor, amenity=
+    arts_centre/gallery/auction_house) — auch bei international bekannten
+    Namen wie Wempe oder Bucherer. Blacklist-Match ist strikt: OSM-
+    Category aus fester Liste + Token-Subset im Namen + brand-Signal
+    müssen alle zutreffen. Konfig in `data/chain-blacklist-wien.json`
+    (≤30 Einträge) und `data/premium-whitelist.json`.
 
 ## Was NICHT tun
 

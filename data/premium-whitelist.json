@@ -1,0 +1,26 @@
+{
+  "$comment": "OSM-Tag-Kategorien die IMMER als Lead behalten werden. Premium-Einzelbetriebe und Enterprise-relevante Branchen. Whitelist hat Vorrang vor Blacklist.",
+  "shop": [
+    "jewelry",
+    "watches",
+    "antiques",
+    "art",
+    "gallery",
+    "boutique",
+    "interior_decoration",
+    "musical_instrument"
+  ],
+  "office": [
+    "lawyer",
+    "notary",
+    "engineer",
+    "architect",
+    "accountant",
+    "tax_advisor"
+  ],
+  "amenity": [
+    "arts_centre",
+    "gallery",
+    "auction_house"
+  ]
+}

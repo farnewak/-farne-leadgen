@@ -1,0 +1,193 @@
+{
+  "$comment": "Matrix for chain-filter.test.ts. Each case carries a synthetic PlaceCandidate shape (name + types[]) plus the expected kept/reason. Types[] follows the OSM mapping convention: one key=value tag plus optional brand:<value>. Google Places candidates are represented as types that do NOT contain '=' — they always keep.",
+  "positiveDrop": [
+    {
+      "label": "Billa Filiale",
+      "name": "Billa Kärntner Straße",
+      "types": ["shop=supermarket", "brand:Billa"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:shop=supermarket:billa"
+    },
+    {
+      "label": "Spar Filiale",
+      "name": "Spar Margareten",
+      "types": ["shop=supermarket", "brand:Spar"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:shop=supermarket:spar"
+    },
+    {
+      "label": "Hofer Filiale",
+      "name": "Hofer",
+      "types": ["shop=supermarket", "brand:Hofer"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:shop=supermarket:hofer"
+    },
+    {
+      "label": "REWE Filiale",
+      "name": "Rewe Mariahilfer Straße",
+      "types": ["shop=supermarket", "brand:Rewe"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:shop=supermarket:rewe"
+    },
+    {
+      "label": "dm Drogerie",
+      "name": "dm drogerie markt",
+      "types": ["shop=chemist", "brand:dm"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:shop=chemist:dm"
+    },
+    {
+      "label": "Bipa Drogerie",
+      "name": "Bipa",
+      "types": ["shop=chemist", "brand:Bipa"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:shop=chemist:bipa"
+    },
+    {
+      "label": "McDonald's",
+      "name": "McDonald's Ringstraße",
+      "types": ["amenity=fast_food", "brand:McDonald's"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:amenity=fast_food:mcdonalds"
+    },
+    {
+      "label": "Burger King",
+      "name": "Burger King Praterstern",
+      "types": ["amenity=fast_food", "brand:Burger King"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:amenity=fast_food:burger-king"
+    },
+    {
+      "label": "Starbucks",
+      "name": "Starbucks Stephansplatz",
+      "types": ["amenity=fast_food", "brand:Starbucks"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:amenity=fast_food:starbucks"
+    },
+    {
+      "label": "OMV Tankstelle",
+      "name": "OMV Tankstelle Wien",
+      "types": ["amenity=fuel", "brand:OMV"],
+      "expectedKept": false,
+      "expectedReason": "blacklist:amenity=fuel:omv"
+    }
+  ],
+  "premiumKeep": [
+    {
+      "label": "Wempe Juwelier",
+      "name": "Wempe",
+      "types": ["shop=jewelry", "brand:Wempe"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:shop:jewelry"
+    },
+    {
+      "label": "Bucherer Uhren",
+      "name": "Bucherer",
+      "types": ["shop=watches", "brand:Bucherer"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:shop:watches"
+    },
+    {
+      "label": "Dorotheum Auktionshaus",
+      "name": "Dorotheum",
+      "types": ["amenity=auction_house"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:amenity:auction_house"
+    },
+    {
+      "label": "Anwaltskanzlei",
+      "name": "Anwaltskanzlei Dr. Müller",
+      "types": ["office=lawyer"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:office:lawyer"
+    },
+    {
+      "label": "Galerie Nächst St. Stephan",
+      "name": "Galerie Nächst St. Stephan",
+      "types": ["shop=art"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:shop:art"
+    },
+    {
+      "label": "Juwelier Heldwein",
+      "name": "Juwelier Heldwein",
+      "types": ["shop=jewelry"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:shop:jewelry"
+    },
+    {
+      "label": "Steffl Department Store",
+      "name": "Steffl Department Store",
+      "types": ["shop=boutique"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:shop:boutique"
+    },
+    {
+      "label": "Notariat",
+      "name": "Notariat Dr. Huber",
+      "types": ["office=notary"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:office:notary"
+    },
+    {
+      "label": "Architekturbüro",
+      "name": "Architekturbüro Weber",
+      "types": ["office=architect"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:office:architect"
+    },
+    {
+      "label": "Antiquitäten",
+      "name": "Antiquitäten Wien",
+      "types": ["shop=antiques"],
+      "expectedKept": true,
+      "expectedReason": "whitelist:shop:antiques"
+    }
+  ],
+  "falsePositiveGuards": [
+    {
+      "label": "Hofer Gasthaus (Restaurant, kein Chain-Tag)",
+      "name": "Hofer Gasthaus",
+      "types": ["amenity=restaurant"],
+      "expectedKept": true,
+      "expectedReason": "keep:no-match"
+    },
+    {
+      "label": "Hofer Gasthaus fälschlich als Supermarkt-Tag, aber ohne brand",
+      "name": "Hofer Gasthaus",
+      "types": ["shop=supermarket"],
+      "expectedKept": true,
+      "expectedReason": "keep:no-match"
+    },
+    {
+      "label": "Starbucks-ähnliches Café",
+      "name": "Starbucks-ähnliches Café",
+      "types": ["amenity=cafe"],
+      "expectedKept": true,
+      "expectedReason": "keep:no-match"
+    },
+    {
+      "label": "Eigenständige Bank Austria Immobilien (kein Bank-Tag)",
+      "name": "Bank Austria Immobilien",
+      "types": ["office=estate_agent"],
+      "expectedKept": true,
+      "expectedReason": "keep:no-match"
+    }
+  ],
+  "edgeCases": [
+    {
+      "label": "Google Places candidate (no OSM key=value)",
+      "name": "Billa",
+      "types": ["supermarket", "food", "establishment"],
+      "expectedKept": true,
+      "expectedReason": "keep:no-match"
+    },
+    {
+      "label": "Kandidat ohne types",
+      "name": "Unbekannter Betrieb",
+      "types": [],
+      "expectedKept": true,
+      "expectedReason": "keep:no-match"
+    }
+  ]
+}
