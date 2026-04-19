@@ -5,6 +5,7 @@ import type {
   DataSourceSearchOptions,
 } from "../tools/datasources/types.js";
 import { classifyIndustry } from "./classify.js";
+import { filterChains } from "../tools/filters/chain-filter.js";
 import { makeLogger } from "../lib/logger.js";
 
 const log = makeLogger("discover");
@@ -144,7 +145,13 @@ export async function discoverLeads(
     }
   }
 
-  const out = Array.from(seen.values()).slice(0, input.maxLeads);
+  // Chain filter runs after dedup, before tier classification. It drops
+  // only B2C mass-market franchise branches (Billa, Spar, McDonald's,
+  // OMV …) and keeps premium single-owner businesses via whitelist
+  // precedence. See src/tools/filters/chain-filter.ts for the contract.
+  const deduped = Array.from(seen.values());
+  const filtered = filterChains(deduped);
+  const out = filtered.slice(0, input.maxLeads);
   const breakdown = Array.from(perSourceContribution.entries())
     .map(([id, n]) => `${id}=${n}`)
     .join(", ");
