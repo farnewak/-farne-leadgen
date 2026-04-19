@@ -1,6 +1,7 @@
 import type { PlaceCandidate } from "../models/types.js";
 import type { Tier, IntentTier, DiscoveryMethod } from "../models/audit.js";
 import { detectParking } from "../tools/probe/parking-detect.js";
+import { enrichB3Candidate, mergeEnrichment } from "./enrich.js";
 import { discoverLeads } from "./discover.js";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
@@ -41,6 +42,15 @@ export interface AuditRunOptions {
   // Optional hook for tests: replaces the default discoverLeads() call.
   // Production callers pass undefined.
   discover?: (limit: number) => Promise<PlaceCandidate[]>;
+  // Optional hook for tests: replaces the Places Text-Search lookup used
+  // by B3-enrichment. When set, the enricher skips its API-key / feature-
+  // flag gating and still writes to the cache dir (spec §D cache-hit test).
+  findPlaceByQuery?: (
+    query: string,
+  ) => Promise<
+    import("../tools/datasources/google-places.js").PlacesQueryMatch | null
+  >;
+  enrichCacheDir?: string;
 }
 
 // Top-level entry: discover candidates, fan out via the host limiter,
@@ -87,7 +97,11 @@ async function processOne(
     }
   }
   try {
-    const row = await auditOne(candidate);
+    const row = await auditOne(candidate, options);
+    if (row === null) {
+      // Dropped by enrichment (CLOSED_PERMANENTLY) — no DB row written.
+      return;
+    }
     if (options.onlyTier && row.tier !== options.onlyTier) return;
     await upsertAudit(row);
   } catch (err) {
@@ -96,9 +110,45 @@ async function processOne(
   }
 }
 
-async function auditOne(candidate: PlaceCandidate): Promise<UpsertAuditInput> {
+async function auditOne(
+  candidateIn: PlaceCandidate,
+  options: AuditRunOptions = {},
+): Promise<UpsertAuditInput | null> {
   const now = new Date();
-  const discovery = await runDiscovery(candidate);
+  let candidate = candidateIn;
+  let discovery = await runDiscovery(candidate);
+
+  // B3-enrichment: if discovery found no URL, ask Google Places whether the
+  // business has one registered there. On CLOSED_PERMANENTLY, drop the lead
+  // entirely (I7). On a websiteUri hit, merge + re-probe so the candidate
+  // enters the normal tier-A path. Phone/address fill in missing candidate
+  // fields only (I6 — OSM has priority).
+  if (discovery.discoveredUrl === null) {
+    const enrichOpts: Parameters<typeof enrichB3Candidate>[1] = {};
+    if (options.findPlaceByQuery) {
+      enrichOpts.findPlaceByQuery = options.findPlaceByQuery;
+    }
+    if (options.enrichCacheDir) enrichOpts.cacheDir = options.enrichCacheDir;
+    const enriched = await enrichB3Candidate(candidate, enrichOpts);
+    if (enriched.verdict === "drop") {
+      log.info(`dropping ${candidate.placeId} (CLOSED_PERMANENTLY)`);
+      return null;
+    }
+    if (enriched.verdict === "updated" && enriched.match) {
+      candidate = mergeEnrichment(candidate, enriched.match);
+      if (candidate.website) {
+        discovery = await probeHome(candidate.website, "gplaces-tag", {
+          discoveredUrl: null,
+          discoveryMethod: null,
+          fetchError: null,
+          homeBody: null,
+          homeHeaders: {},
+          finalUrl: null,
+        });
+      }
+    }
+  }
+
   let tier = classifyTier({
     hasDiscoveredUrl: discovery.discoveredUrl !== null,
     fetchError: discovery.fetchError,

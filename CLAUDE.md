@@ -137,6 +137,48 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
       `intentTier==="PARKED"`. Andere Tiers ignorieren das Feld.
     - Export-Row trägt `intent_tier` als zusätzliche Spalte (Position
       nach `tier`, vor `score`).
+26. [RESOLVED IN THIS PR] B3-Google-Places-Fallback (P0 Contact-Coverage).
+    Tier B3 (kein Website in OSM gefunden) bekommt Google-Places-
+    Enrichment: ggf. ist dort doch eine Website hinterlegt, oder
+    zumindest Phone/Address. Ergebnis: weniger leere B3-Rows im CSV,
+    bessere Kontaktdichte für Cold-Outreach. Umsetzung:
+    - Neue `findPlaceByQuery(query)` in
+      `src/tools/datasources/google-places.ts` (Text Search v1,
+      Field-Mask auf websiteUri, nationalPhoneNumber,
+      internationalPhoneNumber, formattedAddress, businessStatus,
+      displayName).
+    - Neuer Orchestrator `src/pipeline/enrich.ts` mit
+      `enrichB3Candidate(candidate, opts)`. Cache per sha256(name+address)
+      in `runs/places-cache/<hash>.json`, TTL via
+      `PLACES_CACHE_TTL_DAYS` (Default 30). Quota-Guard via
+      `runs/places-cache/quota.json` (UTC-day counter);
+      `GOOGLE_PLACES_DAILY_QUOTA` Default 5000.
+      Verdicts: `drop` (CLOSED_PERMANENTLY), `updated`, `no-match`,
+      `skipped-quota`, `skipped-disabled`.
+      `mergeEnrichment()` respektiert I6: OSM-Felder haben Priorität,
+      Places füllt nur Lücken.
+    - `src/pipeline/audit.ts` ruft Enrichment nur wenn
+      `discovery.discoveredUrl === null` (B3 pre-classify). Bei
+      `updated` + Website → neue probeHome-Runde mit
+      `discoveryMethod="gplaces-tag"`, dann normale Tier-A-Pipeline.
+      Bei `drop` → `auditOne` returned `null`, `processOne`
+      überspringt den DB-Insert (Candidate fliegt aus dem Run).
+    - `buildEmptyTierRow` surfaced `candidate.phone` /
+      `candidate.address` als `impressum_phone` /
+      `impressum_address` — damit enriched Kontakte im CSV sichtbar
+      werden (I8: B3 ohne Website bleibt gültiger Lead-Tier für den
+      Pitch "Wir bauen Ihre erste Website").
+    - I9 (additiv): einziger Drop-Grund ist CLOSED_PERMANENTLY.
+      Cache-Miss, Quota-Erschöpfung oder no-match lassen den
+      Candidate unverändert als B3.
+    - Neue env vars: `B3_ENRICHMENT_ENABLED` (Default true),
+      `GOOGLE_PLACES_DAILY_QUOTA` (5000), `PLACES_CACHE_DIR`
+      (./runs/places-cache), `PLACES_CACHE_TTL_DAYS` (30).
+    - 6 neue Integrationstests in
+      `tests/integration/b3-enrichment.test.ts` decken:
+      Re-Klassifikation zu Tier A, CLOSED_PERMANENTLY-Drop,
+      Quota-Skip, No-Match, Cache-Hit auf zweitem Aufruf,
+      OSM-Priority bei Phone/Address-Merge.
 
 ## Was NICHT tun
 

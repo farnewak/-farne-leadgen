@@ -82,6 +82,12 @@ const envSchema = z.object({
   // --- Custom Search Engine (fallback website discovery) ---
   CSE_DISCOVERY_ENABLED: boolEnvField("false"),
   CSE_MAX_QUERIES_PER_CANDIDATE: z.coerce.number().int().min(0).default(3),
+
+  // --- B3 Google-Places enrichment (contact-coverage P0) ---
+  B3_ENRICHMENT_ENABLED: boolEnvField("true"),
+  GOOGLE_PLACES_DAILY_QUOTA: z.coerce.number().int().min(0).default(5000),
+  PLACES_CACHE_DIR: z.string().default("./runs/places-cache"),
+  PLACES_CACHE_TTL_DAYS: z.coerce.number().int().min(0).default(30),
 });
 
 export type EnvT = z.infer<typeof envSchema>;

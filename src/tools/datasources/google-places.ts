@@ -167,6 +167,90 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Minimal shape returned by findPlaceByQuery — a single-best-match lookup
+// used by the B3-enrichment pipeline (not general discovery). Field-mask is
+// trimmed to the four signals the enricher needs.
+export interface PlacesQueryMatch {
+  websiteUri: string | null;
+  phone: string | null;
+  formattedAddress: string | null;
+  businessStatus:
+    | "OPERATIONAL"
+    | "CLOSED_TEMPORARILY"
+    | "CLOSED_PERMANENTLY"
+    | null;
+}
+
+const FIND_FIELD_MASK = [
+  "places.websiteUri",
+  "places.nationalPhoneNumber",
+  "places.internationalPhoneNumber",
+  "places.formattedAddress",
+  "places.businessStatus",
+  "places.displayName",
+].join(",");
+
+interface RawFindPlace {
+  websiteUri?: string;
+  nationalPhoneNumber?: string;
+  internationalPhoneNumber?: string;
+  formattedAddress?: string;
+  businessStatus?: string;
+  displayName?: { text: string };
+}
+
+// Single-best-match Text Search v1 lookup. Returns the first (highest-ranked)
+// place that matches the query, or null if the API returned no matches.
+// Throws on HTTP error so callers can decide whether to count against quota.
+export async function findPlaceByQuery(
+  query: string,
+): Promise<PlacesQueryMatch | null> {
+  const apiKey = googleApiKey();
+  if (!apiKey) throw new Error("GOOGLE_API_KEY (or legacy alias) not set");
+
+  const body = {
+    textQuery: query,
+    pageSize: 1,
+    locationBias: { rectangle: VIENNA_BOUNDS },
+    languageCode: "de",
+    regionCode: "AT",
+  };
+
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": FIND_FIELD_MASK,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `places:searchText ${res.status}: ${text.slice(0, 200)}`,
+    );
+  }
+
+  const data = (await res.json()) as { places?: RawFindPlace[] };
+  const first = data.places?.[0];
+  if (!first) return null;
+  const status = first.businessStatus;
+  return {
+    websiteUri: first.websiteUri ?? null,
+    phone:
+      first.internationalPhoneNumber ?? first.nationalPhoneNumber ?? null,
+    formattedAddress: first.formattedAddress ?? null,
+    businessStatus:
+      status === "OPERATIONAL" ||
+      status === "CLOSED_TEMPORARILY" ||
+      status === "CLOSED_PERMANENTLY"
+        ? status
+        : null,
+  };
+}
+
 export const googlePlacesSource: DataSource = {
   id: "google-places",
   label: "Google Places",
