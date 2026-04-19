@@ -5,6 +5,7 @@ import * as pgSchema from "./schema.pg.js";
 import type {
   FetchError,
   Tier,
+  IntentTier,
   DiscoveryMethod,
   TechStackSignals,
   SocialLinks,
@@ -46,6 +47,7 @@ export interface UpsertAuditInput {
   socialLinks: SocialLinks;
   fetchError: FetchError | null;
   fetchErrorAt: Date | null;
+  intentTier: IntentTier | null;
   staticSignalsExpiresAt: Date;
   psiSignalsExpiresAt: Date | null;
   score: number | null;
@@ -216,6 +218,7 @@ export async function markAuditError(
     socialLinks: emptySocial,
     fetchError,
     fetchErrorAt: now,
+    intentTier: null,
     staticSignalsExpiresAt: expires,
     psiSignalsExpiresAt: null,
     score: null,

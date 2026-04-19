@@ -15,6 +15,13 @@
       "when": 1776600000000,
       "tag": "0001_audit_results",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776800000000,
+      "tag": "0002_intent_tier",
+      "breakpoints": true
     }
   ]
 }

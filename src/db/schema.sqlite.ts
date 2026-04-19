@@ -143,6 +143,11 @@ export const auditResults = sqliteTable(
       .default(sql`'{}'`),
     fetchError: text("fetch_error"),
     fetchErrorAt: integer("fetch_error_at", { mode: "timestamp_ms" }),
+    // Intent-tier is orthogonal to `tier` — see src/models/audit.ts. NULL
+    // on historical rows until the next re-audit populates it.
+    intentTier: text("intent_tier", {
+      enum: ["PARKED", "DEAD", "LIVE", "NONE"],
+    }),
     staticSignalsExpiresAt: integer("static_signals_expires_at", {
       mode: "timestamp_ms",
     }).notNull(),

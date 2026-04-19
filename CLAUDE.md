@@ -113,6 +113,30 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
     Category aus fester Liste + Token-Subset im Namen + brand-Signal
     müssen alle zutreffen. Konfig in `data/chain-blacklist-wien.json`
     (≤30 Einträge) und `data/premium-whitelist.json`.
+25. [RESOLVED IN THIS PR] Parked-Domain als Intent-Signal (P0). Neues
+    Score-Gewicht `DOMAIN_REGISTERED_NO_SITE = +12` (stärker als
+    `NO_WEBSITE +10` und `DEAD_WEBSITE +9`) kennzeichnet registrierte
+    Domains ohne echte Website als HIGH-INTENT-Leads (Eigentümer hat
+    bereits Kaufabsicht demonstriert). Umsetzung:
+    - Neue `intent_tier`-Spalte auf `audit_results` (enum: PARKED, DEAD,
+      LIVE, NONE) via Migration `0002_intent_tier.sql` + idx.
+    - HTML-Fingerprint-Detektor `src/tools/probe/parking-detect.ts` mit
+      10 Fingerprints (sedo, godaddy, namecheap, ionos, parkingcrew,
+      bodis, server-default, coming-soon, empty-html, whmcs-cpanel).
+      Default auf Unsicherheit: `inconclusive`, NICHT `parked` (I3).
+    - Optionaler WHOIS-Fallback `src/tools/probe/whois.ts` (TCP/43,
+      Timeout 3 s, fail-open → `registered: null`). Audit-Orchestrator
+      ruft aktuell nur HTML-Detect; WHOIS bleibt als Library für spätere
+      Integration verfügbar.
+    - `src/pipeline/audit.ts` ruft `detectParking` nach dem Home-Fetch
+      nur wenn `tier==="A" && discoveredUrl && homeBody`. Bei `parked`
+      → `tier="C"`, `intentTier="PARKED"`. B3 (keine URL) bleibt
+      unberührt.
+    - Scorer `src/pipeline/score.ts`: Tier-C-Branch emittiert
+      `DOMAIN_REGISTERED_NO_SITE` statt `DEAD_WEBSITE` wenn
+      `intentTier==="PARKED"`. Andere Tiers ignorieren das Feld.
+    - Export-Row trägt `intent_tier` als zusätzliche Spalte (Position
+      nach `tier`, vor `score`).
 
 ## Was NICHT tun
 

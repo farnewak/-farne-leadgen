@@ -1,5 +1,6 @@
 import type { PlaceCandidate } from "../models/types.js";
-import type { Tier, DiscoveryMethod } from "../models/audit.js";
+import type { Tier, IntentTier, DiscoveryMethod } from "../models/audit.js";
+import { detectParking } from "../tools/probe/parking-detect.js";
 import { discoverLeads } from "./discover.js";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
@@ -98,7 +99,7 @@ async function processOne(
 async function auditOne(candidate: PlaceCandidate): Promise<UpsertAuditInput> {
   const now = new Date();
   const discovery = await runDiscovery(candidate);
-  const tier = classifyTier({
+  let tier = classifyTier({
     hasDiscoveredUrl: discovery.discoveredUrl !== null,
     fetchError: discovery.fetchError,
     // v0.1: social/directory counts from CSE link-mining are pending
@@ -107,10 +108,45 @@ async function auditOne(candidate: PlaceCandidate): Promise<UpsertAuditInput> {
     directoryHitsCount: 0,
   });
 
-  if (tier !== "A" || !discovery.discoveredUrl) {
-    return buildEmptyTierRow(candidate, tier, discovery, now);
+  // Parking-detection override: a 200-OK parking page looks like a
+  // healthy Tier-A site to the tier-classifier because there's no fetch
+  // error. We must inspect the body and reclassify to tier=C with
+  // intent_tier=PARKED before building the row. Per spec I7, the check
+  // only runs when we have a discovered URL (B3 candidates skip entirely).
+  // Per I3, any ambiguity defaults to DEAD, never PARKED.
+  let intentTier: IntentTier = classifyIntentTier(tier, discovery);
+  if (tier === "A" && discovery.discoveredUrl && discovery.homeBody) {
+    const parking = detectParking({
+      body: discovery.homeBody,
+      finalUrl: discovery.finalUrl,
+      headers: discovery.homeHeaders,
+    });
+    if (parking.verdict === "parked") {
+      log.info(
+        `parking detected for ${candidate.placeId} (${parking.fingerprint})`,
+      );
+      tier = "C";
+      intentTier = "PARKED";
+    }
   }
-  return buildTierARow(candidate, discovery, now);
+
+  if (tier !== "A" || !discovery.discoveredUrl) {
+    return buildEmptyTierRow(candidate, tier, discovery, now, intentTier);
+  }
+  return buildTierARow(candidate, discovery, now, intentTier);
+}
+
+// Derives intent-tier from the existing tier + discovery outcome. Used
+// as the default before parking-detect has a chance to override.
+function classifyIntentTier(
+  tier: Tier,
+  discovery: DiscoveryOutcome,
+): IntentTier {
+  if (tier === "A" && discovery.discoveredUrl && !discovery.fetchError) {
+    return "LIVE";
+  }
+  if (tier === "C") return "DEAD";
+  return "NONE";
 }
 
 async function runDiscovery(candidate: PlaceCandidate): Promise<DiscoveryOutcome> {
@@ -159,6 +195,7 @@ async function buildTierARow(
   candidate: PlaceCandidate,
   discovery: DiscoveryOutcome,
   now: Date,
+  intentTier: IntentTier,
 ): Promise<UpsertAuditInput> {
   const env = loadEnv();
   const url = discovery.discoveredUrl!;
@@ -186,8 +223,17 @@ async function buildTierARow(
     techStack: signals.tech,
     socialLinks: signals.social,
     hasStructuredData: signals.schema.hasSchemaOrg,
+    intentTier,
   });
-  return assembleAuditRow(candidate, discovery, now, signals, psi, score);
+  return assembleAuditRow(
+    candidate,
+    discovery,
+    now,
+    signals,
+    psi,
+    score,
+    intentTier,
+  );
 }
 
 // Parallel-fan signal extraction. Home body already fetched in runDiscovery

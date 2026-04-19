@@ -153,6 +153,49 @@ describe("computeScore — PSI buckets", () => {
   });
 });
 
+describe("computeScore — intent_tier PARKED on tier C", () => {
+  it("tier C with intent_tier=PARKED uses DOMAIN_REGISTERED_NO_SITE (+12)", () => {
+    expect(computeScore(base({ tier: "C", intentTier: "PARKED" }))).toBe(
+      SCORING_WEIGHTS.DOMAIN_REGISTERED_NO_SITE,
+    );
+  });
+
+  it("DOMAIN_REGISTERED_NO_SITE is strictly greater than NO_WEBSITE", () => {
+    // This is the business-invariant: parked domains rank higher than
+    // "never registered" because the owner already demonstrated purchase intent.
+    expect(SCORING_WEIGHTS.DOMAIN_REGISTERED_NO_SITE).toBeGreaterThan(
+      SCORING_WEIGHTS.NO_WEBSITE,
+    );
+    expect(SCORING_WEIGHTS.DOMAIN_REGISTERED_NO_SITE).toBeGreaterThan(
+      SCORING_WEIGHTS.DEAD_WEBSITE,
+    );
+  });
+
+  it("tier C with intent_tier=DEAD falls back to DEAD_WEBSITE (+9)", () => {
+    expect(computeScore(base({ tier: "C", intentTier: "DEAD" }))).toBe(
+      SCORING_WEIGHTS.DEAD_WEBSITE,
+    );
+  });
+
+  it("tier C with no intent_tier stays DEAD_WEBSITE (backward compat)", () => {
+    expect(computeScore(base({ tier: "C" }))).toBe(SCORING_WEIGHTS.DEAD_WEBSITE);
+  });
+
+  it("tier A with intent_tier=PARKED does NOT apply DOMAIN_REGISTERED_NO_SITE", () => {
+    // PARKED only has meaning in the C-bucket. A-rows with the flag set
+    // (shouldn't happen in practice) must not get the parked bonus.
+    const breakdown = scoreBreakdown(base({ tier: "A", intentTier: "PARKED" }));
+    expect(breakdown.find((e) => e.key === "DOMAIN_REGISTERED_NO_SITE")).toBeUndefined();
+  });
+
+  it("tier B3 with intent_tier=PARKED stays NO_WEBSITE", () => {
+    // B3 = no URL at all → parking detect never ran → intent_tier irrelevant.
+    expect(computeScore(base({ tier: "B3", intentTier: "PARKED" }))).toBe(
+      SCORING_WEIGHTS.NO_WEBSITE,
+    );
+  });
+});
+
 describe("scoreBreakdown — invariant with computeScore", () => {
   const TIERS: Tier[] = ["A", "B1", "B2", "B3", "C"];
 

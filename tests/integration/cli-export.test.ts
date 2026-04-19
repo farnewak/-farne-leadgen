@@ -33,7 +33,11 @@ function freshDb(): void {
   }
   mkdirSync(dirname(TMP_DB), { recursive: true });
   const sql = new Database(TMP_DB);
-  const migrations = ["0000_init.sql", "0001_audit_results.sql"].map((f) =>
+  const migrations = [
+    "0000_init.sql",
+    "0001_audit_results.sql",
+    "0002_intent_tier.sql",
+  ].map((f) =>
     readFileSync(resolve(HERE, "../../src/db/migrations/sqlite", f), "utf8"),
   );
   for (const m of migrations) {
