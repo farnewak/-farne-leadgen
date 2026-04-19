@@ -49,6 +49,9 @@ export function emptyTechStack(): TechStackSignals {
 
 // Row factory for tiers B1/B2/B3/C (or A-without-discoveredUrl edge). Uses
 // computeScore's tier-only branch; no signal columns populated.
+// `candidate.phone` / `candidate.address` are surfaced via impressumPhone /
+// impressumAddress so enriched B3 contacts end up in the CSV export.
+// For non-enriched rows these fields are null, matching prior behaviour.
 export function buildEmptyTierRow(
   candidate: PlaceCandidate,
   tier: Tier,
@@ -91,8 +94,8 @@ export function buildEmptyTierRow(
     impressumPresent: false,
     impressumUid: null,
     impressumCompanyName: null,
-    impressumAddress: null,
-    impressumPhone: null,
+    impressumAddress: candidate.address,
+    impressumPhone: candidate.phone,
     impressumEmail: null,
     impressumComplete: null,
     techStack: emptyTechStack(),
