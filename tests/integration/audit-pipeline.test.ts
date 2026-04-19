@@ -56,6 +56,7 @@ function freshDb(): void {
   const migrations = [
     "0000_init.sql",
     "0001_audit_results.sql",
+    "0002_intent_tier.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../../src/db/migrations/sqlite", f), "utf8"),
   );
@@ -107,7 +108,22 @@ describe("runAudit integration", () => {
     agent
       .get("https://www.faketesta.at")
       .intercept({ path: "/", method: "GET" })
-      .reply(200, '<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body><p>hello</p></body></html>')
+      .reply(
+        200,
+        '<!doctype html><html lang="de"><head>' +
+          '<meta name="viewport" content="width=device-width">' +
+          "<title>Testa Café - Wien Favoriten</title>" +
+          "</head><body>" +
+          "<h1>Testa Café</h1>" +
+          "<p>Willkommen bei Testa - Ihrem Café in Wien-Favoriten.</p>" +
+          "<p>Unser Sortiment umfasst Kaffee, Gebäck, Frühstück und Mittagsmenüs.</p>" +
+          "<p>Öffnungszeiten: Montag bis Freitag 07:00 bis 19:00, Samstag 08:00 bis 15:00.</p>" +
+          "<p>Adresse: Favoritenstraße 42, 1100 Wien. Telefon +43 1 234 5678.</p>" +
+          "<p>" +
+          "Lorem ipsum dolor sit amet consectetur adipiscing elit. ".repeat(20) +
+          "</p>" +
+          "</body></html>",
+      )
       .persist();
     // Impressum paths + PSI all 404 for the A candidate (acceptable).
     for (const p of [

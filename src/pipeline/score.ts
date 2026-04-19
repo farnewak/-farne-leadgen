@@ -1,10 +1,20 @@
-import type { Tier, TechStackSignals, SocialLinks } from "../models/audit.js";
+import type {
+  Tier,
+  IntentTier,
+  TechStackSignals,
+  SocialLinks,
+} from "../models/audit.js";
 
 // Signed weights. Positive = "worse web presence", negative = "actively good".
 // The clamp to [0, 30] at the bottom means best-case Tier-A sites floor at 0;
 // anything in the negative band is a strong signal to skip outreach entirely.
 export const SCORING_WEIGHTS = {
   NO_WEBSITE: 10,
+  // Domain registered but only a parking page served. Ranked above
+  // NO_WEBSITE/DEAD_WEBSITE because the owner already spent money on the
+  // domain and signalled purchase intent. Replaces DEAD_WEBSITE for
+  // C-rows with intent_tier=PARKED (see scoreBreakdown below).
+  DOMAIN_REGISTERED_NO_SITE: 12,
   DEAD_WEBSITE: 9,
   ONLY_SOCIAL: 7,
   ONLY_DIRECTORY: 6,
@@ -48,6 +58,10 @@ export interface ScoreInput {
   techStack: TechStackSignals;
   socialLinks: SocialLinks;
   hasStructuredData: boolean;
+  // Optional. When set to "PARKED" on a tier-C row, DOMAIN_REGISTERED_NO_SITE
+  // replaces DEAD_WEBSITE in the breakdown. All other intent-tier values and
+  // all other tiers are unaffected by this field.
+  intentTier?: IntentTier | null;
 }
 
 // Returns the list of signals that contributed to the score, in the same
@@ -68,7 +82,8 @@ export function scoreBreakdown(input: ScoreInput): BreakdownEntry[] {
     return out;
   }
   if (input.tier === "C") {
-    push("DEAD_WEBSITE");
+    if (input.intentTier === "PARKED") push("DOMAIN_REGISTERED_NO_SITE");
+    else push("DEAD_WEBSITE");
     return out;
   }
   if (input.tier === "B1") {

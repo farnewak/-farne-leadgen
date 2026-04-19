@@ -31,6 +31,7 @@ function row(overrides: Partial<ExportRow> = {}): ExportRow {
   return {
     place_id: "p1",
     tier: "A",
+    intent_tier: null,
     score: 10,
     name: "Test",
     url: "https://example.at",
@@ -182,38 +183,38 @@ describe("toCsv — byte-level invariants", () => {
 
   it("columns are semicolon-separated", () => {
     const header = csv.replace("\uFEFF", "").split("\r\n")[0]!;
-    expect(header.split(";")).toHaveLength(18);
+    expect(header.split(";")).toHaveLength(19);
     expect(header.split(";")[0]).toBe("place_id");
   });
 
   it("booleans become 1/0", () => {
-    // ssl_valid column (index 13 zero-based) is "1" for true.
+    // ssl_valid column (index 14 zero-based) is "1" for true.
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[13]).toBe("1");
+    expect(cells[14]).toBe("1");
   });
 
   it("epoch-ms dates become ISO date (yyyy-mm-dd)", () => {
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[16]).toBe("2026-04-10");
+    expect(cells[17]).toBe("2026-04-10");
   });
 
   it("null fields become empty string", () => {
     const r2 = row({ email: null, phone: null });
     const line = toCsv([r2]).split("\r\n")[1]!;
     const cells = line.split(";");
-    // email is column index 6, phone index 5.
-    expect(cells[5]).toBe("");
+    // email is column index 7, phone index 6.
     expect(cells[6]).toBe("");
+    expect(cells[7]).toBe("");
   });
 
   it('embedded " is doubled and wrapped in quotes', () => {
     const r2 = row({ name: 'He said "hi"' });
     const line = toCsv([r2]).split("\r\n")[1]!;
-    // name is index 3. Whole cell wrapped in quotes; inner " doubled.
+    // name is index 4. Whole cell wrapped in quotes; inner " doubled.
     const cells = line.split(";");
-    expect(cells[3]).toBe('"He said ""hi"""');
+    expect(cells[4]).toBe('"He said ""hi"""');
   });
 
   it("semicolon inside a cell triggers quoting", () => {

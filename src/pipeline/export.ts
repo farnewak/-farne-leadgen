@@ -1,5 +1,5 @@
 import type { AuditResult } from "../db/schema.js";
-import type { Tier } from "../models/audit.js";
+import type { Tier, IntentTier } from "../models/audit.js";
 import {
   scoreBreakdown,
   type BreakdownEntry,
@@ -12,6 +12,7 @@ import {
 export interface ExportRow {
   place_id: string;
   tier: Tier;
+  intent_tier: IntentTier | null;
   score: number;
   name: string;
   url: string | null;
@@ -36,6 +37,7 @@ export interface ExportRow {
 export const EXPORT_COLUMNS: ReadonlyArray<keyof ExportRow> = [
   "place_id",
   "tier",
+  "intent_tier",
   "score",
   "name",
   "url",
@@ -146,6 +148,7 @@ export function toJson(rows: ExportRow[]): string {
   const out = rows.map((r) => ({
     place_id: r.place_id,
     tier: r.tier,
+    intent_tier: r.intent_tier,
     score: r.score,
     name: r.name,
     url: r.url,
@@ -213,6 +216,7 @@ function rebuildScoreInput(row: AuditResult): ScoreInput {
     techStack: row.techStack,
     socialLinks: row.socialLinks,
     hasStructuredData: false,
+    intentTier: row.intentTier,
   };
 }
 
@@ -264,6 +268,7 @@ export function rowToExportShape(
   return {
     place_id: row.placeId,
     tier: row.tier,
+    intent_tier: row.intentTier,
     // stored score has precedence; fall back to recomputed when absent
     // (e.g. historical error rows where score was never populated).
     score: row.score ?? recomputed,

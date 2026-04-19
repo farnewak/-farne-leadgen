@@ -1,6 +1,7 @@
 import type { PlaceCandidate } from "../models/types.js";
 import type {
   Tier,
+  IntentTier,
   DiscoveryMethod,
   FetchError,
   TechStackSignals,
@@ -53,6 +54,7 @@ export function buildEmptyTierRow(
   tier: Tier,
   discovery: DiscoveryOutcome,
   now: Date,
+  intentTier: IntentTier | null = null,
 ): UpsertAuditInput {
   const env = loadEnv();
   const score = computeScore({
@@ -67,6 +69,7 @@ export function buildEmptyTierRow(
     techStack: emptyTechStack(),
     socialLinks: {},
     hasStructuredData: false,
+    intentTier,
   });
   return {
     placeId: candidate.placeId,
@@ -97,6 +100,7 @@ export function buildEmptyTierRow(
     socialLinks: {},
     fetchError: discovery.fetchError,
     fetchErrorAt: discovery.fetchError ? now : null,
+    intentTier,
     staticSignalsExpiresAt: new Date(
       now.getTime() + env.AUDIT_STATIC_TTL_DAYS * DAY_MS,
     ),
@@ -114,6 +118,7 @@ export function assembleAuditRow(
   signals: GatheredSignals,
   psi: Awaited<ReturnType<typeof runPsiMobile>>,
   score: number,
+  intentTier: IntentTier | null = "LIVE",
 ): UpsertAuditInput {
   const env = loadEnv();
   return {
@@ -145,6 +150,7 @@ export function assembleAuditRow(
     socialLinks: signals.social,
     fetchError: psi.error,
     fetchErrorAt: psi.error ? now : null,
+    intentTier,
     staticSignalsExpiresAt: new Date(
       now.getTime() + env.AUDIT_STATIC_TTL_DAYS * DAY_MS,
     ),
@@ -160,6 +166,6 @@ export function buildRobotsDisallowedRow(
   discovery: DiscoveryOutcome,
   now: Date,
 ): UpsertAuditInput {
-  const base = buildEmptyTierRow(candidate, "A", discovery, now);
+  const base = buildEmptyTierRow(candidate, "A", discovery, now, "LIVE");
   return { ...base, fetchError: "ROBOTS_DISALLOWED", fetchErrorAt: now };
 }
