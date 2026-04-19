@@ -185,3 +185,29 @@ export const auditResults = pgTable(
     ),
   }),
 );
+
+// Mirrors schema.sqlite.ts:leadOutcomes. See comment there for the FK
+// rationale (soft reference, no cascade).
+export const leadOutcomes = pgTable(
+  "lead_outcomes",
+  {
+    id: serial("id").primaryKey(),
+    leadId: text("lead_id").notNull(),
+    status: text("status", {
+      enum: [
+        "INTERESSIERT",
+        "GESCHLOSSEN",
+        "NICHT_RELEVANT",
+        "NO_ANSWER",
+        "FOLLOWUP",
+      ],
+    }).notNull(),
+    channel: text("channel", { enum: ["MAIL", "CALL", "BESUCH"] }),
+    notes: text("notes"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    leadIdIdx: index("idx_lead_outcomes_lead_id").on(t.leadId),
+    statusIdx: index("idx_lead_outcomes_status").on(t.status),
+  }),
+);

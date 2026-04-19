@@ -5,6 +5,8 @@
 // Invoked via:
 //   npx tsx src/cli/index.ts audit --limit 5
 //   npx tsx src/cli/index.ts discover --plz 1070 --max 100
+//   npx tsx src/cli/index.ts label osm:node:42 INTERESSIERT --channel CALL
+//   npx tsx src/cli/index.ts export-labels --output training.jsonl
 const cmd = process.argv[2];
 
 async function dispatch(): Promise<void> {
@@ -24,8 +26,20 @@ async function dispatch(): Promise<void> {
       await m.main();
       return;
     }
+    case "label": {
+      const m = await import("./label.js");
+      await m.main();
+      return;
+    }
+    case "export-labels": {
+      const m = await import("./export-labels.js");
+      await m.main();
+      return;
+    }
     default:
-      console.error("Usage: leadgen {discover|audit|export}");
+      console.error(
+        "Usage: leadgen {discover|audit|export|label|export-labels}",
+      );
       process.exit(1);
   }
 }

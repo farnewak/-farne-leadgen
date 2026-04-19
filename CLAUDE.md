@@ -257,6 +257,51 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
       `tests/integration/bezirk-scope.test.ts`
       (plzFilter-Propagierung an Sources, Regression-Guard für
       Wien-weit, Query-Scope-Switch in `buildOverpassQuery`).
+29. [RESOLVED IN THIS PR] Scoring-Feedback-Stub (P0). Infrastruktur für
+    Outcome-Sammlung (INTERESSIERT / GESCHLOSSEN / NICHT_RELEVANT /
+    NO_ANSWER / FOLLOWUP) + JSONL-Export als Trainingsdaten-Grundlage
+    für späteres Gewichts-Tuning. **Kein Retraining in P0** (spec §C I6).
+    Umsetzung:
+    - Neue Tabelle `lead_outcomes` (append-only, spec I2) in
+      `src/db/schema.sqlite.ts` + `schema.pg.ts`-Mirror. Spalten:
+      id (PK), lead_id (TEXT, soft-ref auf `audit_results.place_id`,
+      bewusst ohne FK — Labels sollen Audit-Reaudits und Soft-Deletes
+      überleben), status (ENUM CHECK), channel (ENUM CHECK, NULLABLE),
+      notes (TEXT NULLABLE), created_at (unix millis).
+      Indizes: lead_id, status.
+    - Migration `0003_lead_outcomes.sql` für beide Dialects + Journal-
+      Entry in `src/db/migrations/sqlite/meta/_journal.json`. Rollback-
+      safe: nur ein CREATE TABLE + zwei Indizes, keine ALTER auf
+      bestehenden Tables.
+    - Neues Modul `src/db/lead-outcomes.ts` mit `insertOutcome`,
+      `listOutcomes`, `findAuditByPlaceId`, Runtime-Enum-Lists
+      (`LABEL_STATUSES` / `LABEL_CHANNELS`) + Type-Guards.
+    - Neues CLI `src/cli/label.ts`:
+      `leadgen label <lead-id> <status> [--channel C] [--note "..."]`
+      für Einzel-Label; `leadgen label --csv labels.csv` für Bulk-
+      Import. CSV-Header erwartet `lead_id,status,channel,notes`;
+      leere channel/notes sind erlaubt. Eigener Positional-Parser
+      (keine externe CLI-Lib nötig). Up-front-Validation (§C I6):
+      Parse-Fehler → Throw → Exit 1 ohne DB-Write.
+      CSV-Parser handhabt Double-Quotes und `""`-Escapes inline.
+    - Neues CLI `src/cli/export-labels.ts`:
+      `leadgen export-labels [--output training.jsonl]`. Joint jeden
+      Outcome mit `audit_results` (Cache pro Multi-Touchpoint-Lead)
+      und emittet JSONL mit `{lead_id, status, channel, notes,
+      created_at, score, features: {<snapshot>}}`. Feature-Set ist
+      eine stabile Whitelist (23 Columns: tier, ssl_valid, psi_*,
+      impressum_*, tech_stack, social_links, intent_tier, …);
+      Admin-Spalten (ids, expiry-Timestamps, fetch_error) sind raus.
+      Spec §C I7: Werte werden as-stored gelesen, nicht re-evaluiert.
+      Labels ohne Audit-Row werden mit `features: {}` exportiert und
+      auf stderr geloggt.
+    - `src/cli/index.ts` Dispatcher erweitert um `label` +
+      `export-labels`; Usage-Zeile aktualisiert.
+    - 8 Integration-Tests in `tests/integration/label-cli.test.ts`:
+      Einzel-Insert, Append-Only (2× same lead → 2 rows), Invalid-
+      Status → Throw, Invalid-Channel → Throw, Bulk-CSV mit 10 Rows
+      inkl. quoted note, Bulk-CSV-Validation (kein Partial-Commit),
+      JSONL-Schema-Snapshot, Stderr-Warning bei missing audit row.
 
 ## Was NICHT tun
 
