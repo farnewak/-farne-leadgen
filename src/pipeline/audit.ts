@@ -1,7 +1,17 @@
 import type { PlaceCandidate } from "../models/types.js";
-import type { Tier, IntentTier, DiscoveryMethod } from "../models/audit.js";
+import type {
+  Tier,
+  IntentTier,
+  DiscoveryMethod,
+  ImpressumData,
+} from "../models/audit.js";
 import { detectParking } from "../tools/probe/parking-detect.js";
-import { enrichB3Candidate, mergeEnrichment } from "./enrich.js";
+import {
+  enrichB3Candidate,
+  enrichImpressumContacts,
+  mergeEnrichment,
+} from "./enrich.js";
+import type { ScrapedContact } from "../tools/enrich/impressum-scraper.js";
 import { discoverLeads } from "./discover.js";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
@@ -51,6 +61,11 @@ export interface AuditRunOptions {
     import("../tools/datasources/google-places.js").PlacesQueryMatch | null
   >;
   enrichCacheDir?: string;
+  // Test hooks for the aggressive Impressum scraper. `impressumFetch` lets
+  // tests inject a stub HTTP client; `impressumCacheDir` points the scraper
+  // at a throwaway temp dir so runs don't leak into production caches.
+  impressumFetch?: typeof import("../lib/http-fetch.js").fetchUrl;
+  impressumCacheDir?: string;
 }
 
 // Top-level entry: discover candidates, fan out via the host limiter,
@@ -149,6 +164,21 @@ async function auditOne(
     }
   }
 
+  // Aggressive Impressum scrape for contact-coverage (P0). Runs AFTER
+  // B3-enrichment so a Places-discovered website is also covered. Only
+  // active when the candidate actually has a website (spec I1).
+  const scraped = await scrapeContacts(candidate, options);
+  if (scraped) {
+    // Surface scraped phone/address on the candidate so the empty-tier
+    // row-builder (which reads candidate.phone / candidate.address) sees
+    // them. OSM values still take priority — merge is gap-fill only.
+    candidate = {
+      ...candidate,
+      phone: candidate.phone ?? scraped.phone,
+      address: candidate.address ?? scraped.address,
+    };
+  }
+
   let tier = classifyTier({
     hasDiscoveredUrl: discovery.discoveredUrl !== null,
     fetchError: discovery.fetchError,
@@ -183,7 +213,62 @@ async function auditOne(
   if (tier !== "A" || !discovery.discoveredUrl) {
     return buildEmptyTierRow(candidate, tier, discovery, now, intentTier);
   }
-  return buildTierARow(candidate, discovery, now, intentTier);
+  return buildTierARow(candidate, discovery, now, intentTier, scraped);
+}
+
+// Thin shim that runs the aggressive Impressum scraper when a website is
+// available, wiring the audit-run test hooks (injected fetcher + temp cache
+// dir) into the scraper. Returns null when the flag is off or no website.
+async function scrapeContacts(
+  candidate: PlaceCandidate,
+  options: AuditRunOptions,
+): Promise<ScrapedContact | null> {
+  if (!candidate.website) return null;
+  const scrapeOpts: Parameters<typeof enrichImpressumContacts>[1] = {};
+  if (options.impressumFetch) scrapeOpts.fetch = options.impressumFetch;
+  if (options.impressumCacheDir) {
+    scrapeOpts.cacheDir = options.impressumCacheDir;
+  }
+  try {
+    const res = await enrichImpressumContacts(candidate, scrapeOpts);
+    return res?.contact ?? null;
+  } catch (err) {
+    log.warn(
+      `impressum scrape failed for ${candidate.placeId}: ${
+        (err as Error).message
+      }`,
+    );
+    return null;
+  }
+}
+
+// Adapter: ScrapedContact → ImpressumData. Preserves priority semantics:
+// if the legacy in-signals Impressum fetch already produced data, that
+// data wins (it used a longer budget and two-stage DOM walk). Scraper
+// results only fill gaps.
+function mergeImpressum(
+  legacy: ImpressumData,
+  scraped: ScrapedContact | null,
+): ImpressumData {
+  if (!scraped) return legacy;
+  const url = legacy.url ?? scraped.impressumUrl;
+  const uid = legacy.uid ?? scraped.uid;
+  const companyName = legacy.companyName ?? scraped.companyName;
+  const address = legacy.address ?? scraped.address;
+  const phone = legacy.phone ?? scraped.phone;
+  const email = legacy.email ?? scraped.email;
+  const present = legacy.present || url !== null;
+  const complete = Boolean(uid && companyName && address);
+  return {
+    present,
+    url,
+    uid,
+    companyName,
+    address,
+    phone,
+    email,
+    complete,
+  };
 }
 
 // Derives intent-tier from the existing tier + discovery outcome. Used
@@ -246,6 +331,7 @@ async function buildTierARow(
   discovery: DiscoveryOutcome,
   now: Date,
   intentTier: IntentTier,
+  scraped: ScrapedContact | null,
 ): Promise<UpsertAuditInput> {
   const env = loadEnv();
   const url = discovery.discoveredUrl!;
@@ -259,6 +345,9 @@ async function buildTierARow(
   }
 
   const signals = await gatherSignals(url, host, discovery);
+  // Merge aggressive-scraper results into the canonical ImpressumData,
+  // preferring the legacy in-signals fetch when it already found a value.
+  signals.impressum = mergeImpressum(signals.impressum, scraped);
   const psi = await runPsiMobile(url);
 
   const score = computeScore({

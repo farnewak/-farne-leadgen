@@ -23,6 +23,11 @@ export interface ExportRow {
   plz: string | null;
   uid: string | null;
   impressum_complete: boolean | null;
+  // Contact-coverage flag: union of channels present on the row.
+  // "" = no channel, "P" = phone only, "E" = email only, "A" = address only,
+  // "PEA" = all three. Drives outreach targeting (≥PEA rows are ready for
+  // cold mail + cold call + drop-in visit).
+  coverage: "" | "P" | "E" | "A" | "PE" | "PA" | "EA" | "PEA";
   psi_mobile_performance: number | null;
   ssl_valid: boolean | null;
   cms: string;
@@ -48,6 +53,7 @@ export const EXPORT_COLUMNS: ReadonlyArray<keyof ExportRow> = [
   "plz",
   "uid",
   "impressum_complete",
+  "coverage",
   "psi_mobile_performance",
   "ssl_valid",
   "cms",
@@ -159,6 +165,7 @@ export function toJson(rows: ExportRow[]): string {
     plz: r.plz,
     uid: r.uid,
     impressum_complete: r.impressum_complete,
+    coverage: r.coverage,
     psi_mobile_performance: r.psi_mobile_performance,
     ssl_valid: r.ssl_valid,
     cms: r.cms,
@@ -281,6 +288,7 @@ export function rowToExportShape(
     plz,
     uid: row.impressumUid,
     impressum_complete: row.impressumComplete,
+    coverage: buildCoverage(row.impressumPhone, email, row.impressumAddress),
     psi_mobile_performance: row.psiMobilePerformance,
     ssl_valid: row.sslValid,
     cms: row.techStack.cms.join(","),
@@ -288,4 +296,19 @@ export function rowToExportShape(
     audited_at: row.auditedAt,
     score_breakdown: breakdown,
   };
+}
+
+// Derives the Coverage flag from the three persisted contact channels.
+// Matches the enum defined on ExportRow. Order P → E → A is fixed so
+// "PE" / "PA" / "EA" / "PEA" string-compare to the same buckets across
+// different row generators.
+export function buildCoverage(
+  phone: string | null,
+  email: string | null,
+  address: string | null,
+): ExportRow["coverage"] {
+  const p = phone ? "P" : "";
+  const e = email ? "E" : "";
+  const a = address ? "A" : "";
+  return (p + e + a) as ExportRow["coverage"];
 }

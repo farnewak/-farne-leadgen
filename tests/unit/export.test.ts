@@ -42,6 +42,7 @@ function row(overrides: Partial<ExportRow> = {}): ExportRow {
     plz: null,
     uid: null,
     impressum_complete: null,
+    coverage: "",
     psi_mobile_performance: null,
     ssl_valid: null,
     cms: "",
@@ -183,21 +184,21 @@ describe("toCsv — byte-level invariants", () => {
 
   it("columns are semicolon-separated", () => {
     const header = csv.replace("\uFEFF", "").split("\r\n")[0]!;
-    expect(header.split(";")).toHaveLength(19);
+    expect(header.split(";")).toHaveLength(20);
     expect(header.split(";")[0]).toBe("place_id");
   });
 
   it("booleans become 1/0", () => {
-    // ssl_valid column (index 14 zero-based) is "1" for true.
+    // ssl_valid column (index 15 zero-based) is "1" for true.
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[14]).toBe("1");
+    expect(cells[15]).toBe("1");
   });
 
   it("epoch-ms dates become ISO date (yyyy-mm-dd)", () => {
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[17]).toBe("2026-04-10");
+    expect(cells[18]).toBe("2026-04-10");
   });
 
   it("null fields become empty string", () => {

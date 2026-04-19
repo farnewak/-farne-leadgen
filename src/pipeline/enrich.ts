@@ -8,6 +8,11 @@ import {
 } from "../tools/datasources/google-places.js";
 import { googleApiKey, loadEnv } from "../lib/env.js";
 import { makeLogger } from "../lib/logger.js";
+import {
+  scrapeImpressum,
+  type ScrapedContact,
+  type ScrapeOptions,
+} from "../tools/enrich/impressum-scraper.js";
 
 const log = makeLogger("enrich");
 
@@ -236,4 +241,34 @@ function verdictForMatch(
     return { verdict: "drop", match, cacheHit };
   }
   return { verdict: "updated", match, cacheHit };
+}
+
+// ----- Impressum contact-coverage enrichment -----
+//
+// Runs AFTER B3-Google-Places-Enrichment. Scrapes the candidate website for
+// phone/email/address (spec §B wire-in point). Returns null when no website
+// is known (I1) or when the feature flag is off. OSM-priority is respected:
+// candidate fields that already exist are NOT overwritten — the scraper
+// result only fills gaps.
+
+export interface ImpressumEnrichResult {
+  contact: ScrapedContact;
+  merged: PlaceCandidate;
+}
+
+export async function enrichImpressumContacts(
+  candidate: PlaceCandidate,
+  opts: ScrapeOptions = {},
+): Promise<ImpressumEnrichResult | null> {
+  const env = loadEnv();
+  if (!env.IMPRESSUM_SCRAPER_ENABLED) return null;
+  if (!candidate.website) return null; // I1
+
+  const contact = await scrapeImpressum(candidate.website, opts);
+  const merged: PlaceCandidate = {
+    ...candidate,
+    phone: candidate.phone ?? contact.phone,
+    address: candidate.address ?? contact.address,
+  };
+  return { contact, merged };
 }
