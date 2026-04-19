@@ -165,6 +165,36 @@ export const auditResults = sqliteTable(
   }),
 );
 
+// Append-only outcome log. One row per touchpoint — the CLI never updates
+// an existing row, the history of status changes is the data (spec §C I2).
+// `lead_id` references `audit_results.place_id` semantically but is kept as
+// a plain text column: we want labels to survive audit re-runs and soft
+// deletes, and a hard FK would force either cascade (loses history) or
+// restrict (blocks cleanup).
+export const leadOutcomes = sqliteTable(
+  "lead_outcomes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leadId: text("lead_id").notNull(),
+    status: text("status", {
+      enum: [
+        "INTERESSIERT",
+        "GESCHLOSSEN",
+        "NICHT_RELEVANT",
+        "NO_ANSWER",
+        "FOLLOWUP",
+      ],
+    }).notNull(),
+    channel: text("channel", { enum: ["MAIL", "CALL", "BESUCH"] }),
+    notes: text("notes"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    leadIdIdx: index("idx_lead_outcomes_lead_id").on(t.leadId),
+    statusIdx: index("idx_lead_outcomes_status").on(t.status),
+  }),
+);
+
 export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type Snapshot = typeof snapshots.$inferSelect;
@@ -174,3 +204,5 @@ export type NewRun = typeof runs.$inferInsert;
 export type ChainOverride = typeof chainOverrides.$inferSelect;
 export type AuditResult = typeof auditResults.$inferSelect;
 export type NewAuditResult = typeof auditResults.$inferInsert;
+export type LeadOutcome = typeof leadOutcomes.$inferSelect;
+export type NewLeadOutcome = typeof leadOutcomes.$inferInsert;
