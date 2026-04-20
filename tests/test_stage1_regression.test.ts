@@ -305,58 +305,110 @@ describe("stage1 regression lock", () => {
     // assertions on specific columns — this is a regression lock, not a spec.
     expect(r1).toMatchInlineSnapshot(`
       {
-        "address": "Wipplingerstraße 14, 1010 Wien",
+        "address": "GmbHWipplingerstraße 14, 1010 Wien",
         "audited_at": 2026-04-20T12:00:00.000Z,
         "cms": "",
-        "coverage": "PA",
+        "coverage": "A",
         "email": null,
         "email_is_generic": false,
         "has_social": false,
-        "impressum_complete": null,
-        "intent_tier": "PARKED",
+        "impressum_complete": false,
+        "intent_tier": "LIVE",
         "name": "Kleinmeister-Cafe",
-        "phone": "+43 1 555 1010",
+        "phone": null,
         "place_id": "osm:node:100000001",
         "plz": "1010",
         "psi_mobile_performance": null,
-        "score": 12,
+        "score": 14,
         "score_breakdown": [
           {
-            "delta": 12,
-            "key": "DOMAIN_REGISTERED_NO_SITE",
+            "delta": 3,
+            "key": "NO_SSL",
+          },
+          {
+            "delta": 2,
+            "key": "NO_HTTPS_REDIRECT",
+          },
+          {
+            "delta": 3,
+            "key": "NO_MOBILE_VIEWPORT",
+          },
+          {
+            "delta": 2,
+            "key": "IMPRESSUM_INCOMPLETE",
+          },
+          {
+            "delta": 1,
+            "key": "NO_UID",
+          },
+          {
+            "delta": 1,
+            "key": "NO_ANALYTICS",
+          },
+          {
+            "delta": 1,
+            "key": "NO_MODERN_TRACKING",
+          },
+          {
+            "delta": 1,
+            "key": "NO_SOCIAL_LINKS",
           },
         ],
-        "ssl_valid": null,
-        "tier": "C",
+        "ssl_valid": false,
+        "tier": "A",
         "uid": null,
         "url": "https://www.kleinmeister-cafe.at",
       }
     `);
     expect(r2).toMatchInlineSnapshot(`
       {
-        "address": "Landstraßer Hauptstraße 146, 1030 Wien",
+        "address": null,
         "audited_at": 2026-04-20T12:00:00.000Z,
         "cms": "",
-        "coverage": "PA",
+        "coverage": "",
         "email": null,
         "email_is_generic": false,
         "has_social": false,
-        "impressum_complete": null,
-        "intent_tier": "PARKED",
+        "impressum_complete": false,
+        "intent_tier": "LIVE",
         "name": "Spar",
-        "phone": "+43 1 711 11 0",
+        "phone": null,
         "place_id": "osm:node:100000002",
-        "plz": "1030",
+        "plz": null,
         "psi_mobile_performance": null,
-        "score": 12,
+        "score": 14,
         "score_breakdown": [
           {
-            "delta": 12,
-            "key": "DOMAIN_REGISTERED_NO_SITE",
+            "delta": 3,
+            "key": "NO_SSL",
+          },
+          {
+            "delta": 2,
+            "key": "NO_HTTPS_REDIRECT",
+          },
+          {
+            "delta": 3,
+            "key": "NO_MOBILE_VIEWPORT",
+          },
+          {
+            "delta": 3,
+            "key": "NO_IMPRESSUM",
+          },
+          {
+            "delta": 1,
+            "key": "NO_ANALYTICS",
+          },
+          {
+            "delta": 1,
+            "key": "NO_MODERN_TRACKING",
+          },
+          {
+            "delta": 1,
+            "key": "NO_SOCIAL_LINKS",
           },
         ],
-        "ssl_valid": null,
-        "tier": "C",
+        "ssl_valid": false,
+        "tier": "A",
         "uid": null,
         "url": "https://www.spar.at/standorte/eurospar-wien-1030-landstrasser-hauptstrasse-146",
       }
