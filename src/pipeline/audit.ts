@@ -289,6 +289,11 @@ function classifyIntentTier(
     return "LIVE";
   }
   if (tier === "C") return "DEAD";
+  // FIX 4: tier B3 means we never found a URL for this lead. The domain-
+  // level signal is "no website at all", not the legacy NONE catch-all.
+  // Tier B1/B2 (social/directory-only) stay NONE because they do have
+  // *some* web surface, just not a primary site.
+  if (tier === "B3") return "DEAD_WEBSITE";
   return "NONE";
 }
 

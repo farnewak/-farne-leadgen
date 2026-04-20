@@ -423,7 +423,7 @@ describe("stage1 regression lock", () => {
         "email_is_generic": false,
         "has_social": false,
         "impressum_complete": null,
-        "intent_tier": "NONE",
+        "intent_tier": "DEAD_WEBSITE",
         "name": "",
         "phone": null,
         "place_id": "osm:node:100000003",

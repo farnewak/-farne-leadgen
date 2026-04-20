@@ -5,16 +5,30 @@ export type Tier = (typeof TIERS)[number];
 
 // Intent-tier is orthogonal to the A/B1/B2/B3/C bucketing and captures the
 // domain-level signal rather than the site-quality signal:
-//   LIVE   = tier A with a real, non-parked site.
-//   PARKED = a registered domain with only a parking page — HIGH-intent lead.
-//            Always paired with tier=C (the site is effectively dead despite
-//            returning HTTP 200). Outranks LIVE because the owner has
-//            already paid for the domain and signalled purchase readiness.
-//   DEAD   = tier C caused by fetch error (cert/5xx/DNS) — no parking page.
-//   NONE   = no URL to probe (tier B1/B2/B3) OR not yet classified.
+//   LIVE         = tier A with a real, non-parked site.
+//   PARKED       = a registered domain with only a parking page — HIGH-intent
+//                  lead. Always paired with tier=C (the site is effectively
+//                  dead despite returning HTTP 200). Outranks LIVE because
+//                  the owner has already paid for the domain and signalled
+//                  purchase readiness.
+//   DEAD         = tier C caused by fetch error (cert/5xx/DNS) — no parking
+//                  page. The domain exists but the site is broken.
+//   DEAD_WEBSITE = tier B3 with no discovered URL at all (FIX 4). The lead
+//                  has no web presence that we could find — primary target
+//                  for "wir bauen Ihre erste Website"-Outreach.
+//   NONE         = legacy catch-all for rows where the intent signal was
+//                  never computed. New runs must pick one of the explicit
+//                  values above; NONE remains in the enum only for historical
+//                  rows that predate intent-tier wiring.
 // v0.1 schema adds this as a nullable column; historical rows migrate to
 // NULL and are populated on re-audit.
-export const INTENT_TIERS = ["PARKED", "DEAD", "LIVE", "NONE"] as const;
+export const INTENT_TIERS = [
+  "PARKED",
+  "DEAD",
+  "DEAD_WEBSITE",
+  "LIVE",
+  "NONE",
+] as const;
 export type IntentTier = (typeof INTENT_TIERS)[number];
 
 export const DISCOVERY_METHODS = [

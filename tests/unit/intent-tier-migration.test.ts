@@ -77,7 +77,7 @@ describe("0002_intent_tier migration", () => {
     expect(names).toContain("idx_audit_intent_tier");
   });
 
-  it("allows insert of all 4 intent_tier enum values plus NULL", () => {
+  it("allows insert of all 5 intent_tier enum values plus NULL", () => {
     const db = new Database(TMP_DB);
     applyMigrations(db);
 
@@ -91,7 +91,7 @@ describe("0002_intent_tier migration", () => {
     );
     const now = Date.now();
     const expires = now + 30 * 24 * 60 * 60 * 1000;
-    for (const v of ["PARKED", "DEAD", "LIVE", "NONE", null]) {
+    for (const v of ["PARKED", "DEAD", "DEAD_WEBSITE", "LIVE", "NONE", null]) {
       stmt.run(`p-${v ?? "null"}`, now, "C", expires, v);
     }
     const rows = db
@@ -99,6 +99,6 @@ describe("0002_intent_tier migration", () => {
       .all();
     db.close();
 
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6);
   });
 });

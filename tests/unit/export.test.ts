@@ -436,10 +436,10 @@ describe("rowToExportShape — FIX 3 invariants", () => {
     expect(() => rowToExportShape(db)).toThrow(/bad:4.*intent_tier=LIVE/);
   });
 
-  it("tier='B3' with intent_tier=NONE and score=10 is allowed (FIX 4 preview)", () => {
+  it("tier='B3' with intent_tier=DEAD_WEBSITE and score=10 is allowed (FIX 4)", () => {
     const db = auditRow({
       tier: "B3",
-      intentTier: "NONE",
+      intentTier: "DEAD_WEBSITE",
       score: 10,
       discoveredUrl: null,
     });

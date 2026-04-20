@@ -165,7 +165,7 @@ export const auditResults = pgTable(
       mode: "date",
     }),
     intentTier: text("intent_tier", {
-      enum: ["PARKED", "DEAD", "LIVE", "NONE"],
+      enum: ["PARKED", "DEAD", "DEAD_WEBSITE", "LIVE", "NONE"],
     }),
     staticSignalsExpiresAt: timestamp("static_signals_expires_at", {
       withTimezone: true,
