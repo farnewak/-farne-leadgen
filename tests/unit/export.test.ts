@@ -361,3 +361,106 @@ describe("rowToExportShape", () => {
     );
   });
 });
+
+describe("rowToExportShape — FIX 3 invariants", () => {
+  it("emits score AS STORED — no fallback when null", () => {
+    // Under the old rule, score=null would be silently replaced by the
+    // recomputed breakdown sum. FIX 3 removes that fallback.
+    const db = auditRow({ tier: "C", score: null, intentTier: null });
+    const shape = rowToExportShape(db);
+    expect(shape.score).toBeNull();
+  });
+
+  it("emits score AS STORED — no fallback when non-null but disagreeing", () => {
+    // Stored score=99 must come through untouched; the recomputed breakdown
+    // sum is for the score_breakdown column only.
+    const db = auditRow({ score: 99 });
+    const warned: string[] = [];
+    const shape = rowToExportShape(db, { warn: (m) => warned.push(m) });
+    expect(shape.score).toBe(99);
+  });
+
+  it("tier='C' with intent_tier=PARKED and non-null score is allowed", () => {
+    const db = auditRow({
+      tier: "C",
+      intentTier: "PARKED",
+      score: 12,
+      discoveredUrl: "https://parked.example.at",
+    });
+    expect(() => rowToExportShape(db)).not.toThrow();
+  });
+
+  it("tier='C' with intent_tier=null and null score is allowed (error row)", () => {
+    const db = auditRow({ tier: "C", intentTier: null, score: null });
+    expect(() => rowToExportShape(db)).not.toThrow();
+  });
+
+  it("throws when tier='C' carries intent_tier='LIVE' (not in allowed set)", () => {
+    // Give a non-null score so invariant (3) fires, not invariant (2).
+    const db = auditRow({
+      tier: "C",
+      intentTier: "LIVE",
+      score: 5,
+      placeId: "bad:1",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:1.*tier='C'.*LIVE/);
+  });
+
+  it("throws when tier='C' carries intent_tier='DEAD' (DEAD belongs on B3, not C)", () => {
+    const db = auditRow({
+      tier: "C",
+      intentTier: "DEAD",
+      score: 5,
+      placeId: "bad:2",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:2.*DEAD/);
+  });
+
+  it("throws when tier='C' with intent_tier=null has non-null score", () => {
+    const db = auditRow({
+      tier: "C",
+      intentTier: null,
+      score: 5,
+      placeId: "bad:3",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:3.*score=null/);
+  });
+
+  it("throws when intent_tier='LIVE' but score is null (non-error)", () => {
+    const db = auditRow({
+      tier: "A",
+      intentTier: "LIVE",
+      score: null,
+      placeId: "bad:4",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:4.*intent_tier=LIVE/);
+  });
+
+  it("tier='B3' with intent_tier=NONE and score=10 is allowed (FIX 4 preview)", () => {
+    const db = auditRow({
+      tier: "B3",
+      intentTier: "NONE",
+      score: 10,
+      discoveredUrl: null,
+    });
+    expect(() => rowToExportShape(db)).not.toThrow();
+  });
+
+  it("filterRows drops null-score rows regardless of min/max", () => {
+    const rows: ExportRow[] = [
+      row({ place_id: "ok", score: 10, tier: "A" }),
+      row({ place_id: "err", score: null, tier: "C" }),
+    ];
+    const out = filterRows(rows, defaultFilter({ minScore: 0, maxScore: 30 }));
+    expect(out.map((r) => r.place_id)).toEqual(["ok"]);
+  });
+
+  it("sortRows puts null-score rows at the bottom", () => {
+    const rows: ExportRow[] = [
+      row({ place_id: "err", score: null, tier: "C" }),
+      row({ place_id: "ok", score: 10, tier: "A" }),
+    ];
+    const sorted = sortRows(rows);
+    expect(sorted.map((r) => r.place_id)).toEqual(["ok", "err"]);
+  });
+});

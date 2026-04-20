@@ -13,7 +13,11 @@ export interface ExportRow {
   place_id: string;
   tier: Tier;
   intent_tier: IntentTier | null;
-  score: number;
+  // Null is an EXPLICIT value — it marks audit-error rows (tier=C with no
+  // scorable signals). The serializer no longer falls back to a recomputed
+  // score when the stored value is null; callers that need a numeric value
+  // must either filter tier=C out or handle null themselves.
+  score: number | null;
   name: string;
   url: string | null;
   phone: string | null;
@@ -81,6 +85,9 @@ export function filterRows(
     if (opts.plzList) {
       if (r.plz === null || !opts.plzList.includes(r.plz)) return false;
     }
+    // Null score = audit-error row; those never satisfy a score-window
+    // filter regardless of min/max. Outreach flows want scorable rows.
+    if (r.score === null) return false;
     if (r.score < opts.minScore) return false;
     if (r.score > opts.maxScore) return false;
     return true;
@@ -91,10 +98,12 @@ export function filterRows(
 
 // Stable sort: score DESC, then audited_at DESC. Business-invariant: "hotter
 // lead first". No optional sort direction — tuning happens in the scorer, not
-// in export flags.
+// in export flags. Null scores sort to the bottom of the list.
 export function sortRows(rows: ExportRow[]): ExportRow[] {
   return [...rows].sort((a, b) => {
-    if (a.score !== b.score) return b.score - a.score;
+    const as = a.score ?? -Infinity;
+    const bs = b.score ?? -Infinity;
+    if (as !== bs) return bs - as;
     return b.audited_at.getTime() - a.audited_at.getTime();
   });
 }
@@ -236,10 +245,74 @@ export interface RowToExportShapeOptions {
   warn?: (msg: string) => void;
 }
 
+// Intent-tier values that are permitted to co-exist with tier='C'. `null`
+// is also permitted (legacy / not-yet-classified error rows). PARKED is
+// included as a business-meaning label: a C-row flagged as a registered
+// parking page; score is allowed to carry the DOMAIN_REGISTERED_NO_SITE
+// bonus rather than being nulled out.
+const TIER_C_ALLOWED_INTENT_TIERS = new Set<string>([
+  "AUDIT_ERROR",
+  "TIMEOUT",
+  "PARKED",
+]);
+
+// Intent-tier labels used for audit-error rows. These are the only
+// intent-tier values that are permitted to pair with a null score.
+const AUDIT_ERROR_INTENT_TIERS = new Set<string>(["AUDIT_ERROR", "TIMEOUT"]);
+
+function assertExportInvariants(row: AuditResult): void {
+  const id = row.placeId;
+  // (1) score non-null implies tier non-null. tier is typed as Tier so
+  // this is vacuous at the type level; the runtime check guards against
+  // a DB row with a NULL tier column sneaking through.
+  if (row.score !== null && !row.tier) {
+    throw new Error(
+      `export invariant violated (row ${id}): score=${row.score} but tier is null`,
+    );
+  }
+  // (2) intent_tier non-null implies score non-null, unless the intent
+  // tier is an explicit audit-error label.
+  if (
+    row.intentTier !== null &&
+    row.score === null &&
+    !AUDIT_ERROR_INTENT_TIERS.has(row.intentTier)
+  ) {
+    throw new Error(
+      `export invariant violated (row ${id}): intent_tier=${row.intentTier} but score=null`,
+    );
+  }
+  // (3) tier='C' constrains intent_tier to {null} ∪ allowed labels. Any
+  // other value on a C row is a data bug — callers should have picked a
+  // non-C tier (e.g. B3 with intent_tier=DEAD_WEBSITE per FIX 4).
+  if (row.tier === "C") {
+    if (
+      row.intentTier !== null &&
+      !TIER_C_ALLOWED_INTENT_TIERS.has(row.intentTier)
+    ) {
+      throw new Error(
+        `export invariant violated (row ${id}): tier='C' but intent_tier='${row.intentTier}' is not an allowed audit-error label`,
+      );
+    }
+    // (4) tier='C' with an error-label (or null) must carry a null
+    // score. Only PARKED is allowed to carry a numeric score on a C row.
+    if (
+      (row.intentTier === null ||
+        AUDIT_ERROR_INTENT_TIERS.has(row.intentTier ?? "")) &&
+      row.score !== null
+    ) {
+      throw new Error(
+        `export invariant violated (row ${id}): tier='C' with intent_tier=${row.intentTier ?? "null"} must have score=null (got ${row.score})`,
+      );
+    }
+  }
+}
+
 export function rowToExportShape(
   row: AuditResult,
   opts: RowToExportShapeOptions = {},
 ): ExportRow {
+  assertExportInvariants(row);
+
   const name = row.impressumCompanyName ?? hostnameFallback(row.discoveredUrl);
   const email = row.impressumEmail;
   const emailIsGeneric = email !== null && row.genericEmails.includes(email);
@@ -276,9 +349,10 @@ export function rowToExportShape(
     place_id: row.placeId,
     tier: row.tier,
     intent_tier: row.intentTier,
-    // stored score has precedence; fall back to recomputed when absent
-    // (e.g. historical error rows where score was never populated).
-    score: row.score ?? recomputed,
+    // Serializer emits score AS STORED. Any upstream bug that left score
+    // null must be visible here — the prior `?? recomputed` fallback hid
+    // exactly that kind of defect (see Phase 1 regression R3).
+    score: row.score,
     name,
     url: row.discoveredUrl,
     phone: row.impressumPhone,

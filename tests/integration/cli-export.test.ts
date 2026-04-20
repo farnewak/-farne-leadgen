@@ -51,11 +51,13 @@ function freshDb(): void {
 }
 
 // Seeds N rows with deterministic field values. Score distribution:
-//   i=0 → score 20 / Tier A
-//   i=1..3 → score 15..13 / Tier B1
-//   i=4..6 → score 10 / Tier B2
-//   i=7..8 → score 9 / Tier B3
-//   i=9 → score 5 / Tier C
+//   i=0    → score 0  / Tier A  (all signals clean)
+//   i=1..3 → score 7  / Tier B1 (ONLY_SOCIAL)
+//   i=4..6 → score 6  / Tier B2 (ONLY_DIRECTORY)
+//   i=7..N → score 10 / Tier B3 (NO_WEBSITE)
+// All rows are FIX 3 invariant-compliant: a legitimate tier=C row must
+// have score=null + intent_tier∈{null,AUDIT_ERROR,TIMEOUT,PARKED}, so
+// the seed uses tier=B3 for the "no-site" bucket (matches FIX 4 behaviour).
 // Stored score matches what rebuildScoreInput would compute, so no
 // mismatch-warnings fire during export.
 function seedRows(count: number): void {
@@ -104,12 +106,9 @@ function seedRows(count: number): void {
     } else if (i <= 6) {
       tier = "B2";
       score = 6; // ONLY_DIRECTORY
-    } else if (i <= 8) {
+    } else {
       tier = "B3";
       score = 10; // NO_WEBSITE
-    } else {
-      tier = "C";
-      score = 9; // DEAD_WEBSITE
     }
     insert.run(
       `p${i}`,
