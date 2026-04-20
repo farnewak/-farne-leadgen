@@ -26,9 +26,14 @@ ssl_valid, cms, has_social, audited_at, score_breakdown`
 ## Tier classification (A / B1 / B2 / B3 / C)
 
 - **`src/pipeline/tier-classifier.ts`** — `classifyTier(input: TierInput): Tier`. Pure decision table: reachable+no-error → A; reachable+(CERT_EXPIRED|HTTP_5XX|DNS_FAIL) → C; else B1/B2/B3 by social/directory counts. `TIER_C_ERRORS` is the fixed triple of errors that mean "site is broken, not flaky".
-- **`src/pipeline/audit.ts`** — `auditOne()` calls `classifyTier()`, then may override `tier="C" / intentTier="PARKED"` based on `detectParking()`. `classifyIntentTier()` derives the default intent-tier from tier + discovery outcome (LIVE / DEAD / NONE).
-- **`src/models/audit.ts`** — `TIERS`, `INTENT_TIERS`, `FETCH_ERRORS`, `DISCOVERY_METHODS` const arrays; `Tier`, `IntentTier`, `FetchError`, `DiscoveryMethod` types.
-- **`src/tools/probe/parking-detect.ts`** — `detectParking({ body, finalUrl, headers })`. HTML-fingerprint detector with 10 parking-page signatures (sedo, godaddy, namecheap, ionos, parkingcrew, bodis, server-default, coming-soon, empty-html, whmcs-cpanel). On match, audit reclassifies the Tier-A row to tier=C / intent_tier=PARKED.
+- **`src/pipeline/audit.ts`** — `auditOne()` calls `classifyTier()`, then may override `tier="C" / intentTier="PARKED"` based on `detectParking()`. `classifyIntentTier()` derives the default intent-tier from tier + discovery outcome. Mapping after Phase 2A (FIX 4):
+  - tier=A + discoveredUrl + no fetchError → **LIVE**
+  - tier=C (classifier or parking-override) → **DEAD** (parking-override sets PARKED explicitly before this call)
+  - tier=B3 (no discovered URL at all) → **DEAD_WEBSITE**
+  - everything else (B1/B2 with social/directory signal) → **NONE**
+- **`src/models/audit.ts`** — `TIERS`, `INTENT_TIERS`, `FETCH_ERRORS`, `DISCOVERY_METHODS` const arrays; `Tier`, `IntentTier`, `FetchError`, `DiscoveryMethod` types. `INTENT_TIERS = ["PARKED","DEAD","DEAD_WEBSITE","LIVE","NONE"]` — DEAD_WEBSITE is new in FIX 4, NONE retained for legacy rows.
+- **`src/tools/probe/parking-detect.ts`** — `detectParking({ body, finalUrl, headers })`. Rewritten in FIX 1 from a 10-fingerprint library to a strict 2-of-3 co-signal rule. Signals: (a) `small-body` (body <1024 bytes), (b) `parking-text` (title or body regex: sedo/godaddy/namecheap/ionos/bodis/dan.com/uniregistry/afternic/parkingcrew, "for sale"/"to buy"/"coming soon"/"this domain"/"parked"/"default web page"), (c) `server-header` (Server: sedo|parkingcrew|bodis|afternic). Verdicts: ≥2 signals → `parked`, exactly 1 → `inconclusive` (fail-open, no override), 0 → `not-parked`. On `parked`, `auditOne()` reclassifies the Tier-A row to tier=C / intent_tier=PARKED.
+- **`src/pipeline/dns-probe.ts`** — hardened in FIX 2. Returns a discriminated-union `DnsProbeResult = {found:true, candidateUrl, validated} | {found:false, reason: DnsProbeSkipReason}`. Skip reasons: `DNS_PROBE_DISABLED` (env-gate, `DNS_PROBE_ENABLED !== "true"` — unset by default), `NO_NAME` (null/empty/whitespace name), `BRANCH_NAME` (name contains filiale/standort/zweigstelle after umlaut-fold + lowercasing), `NO_CANDIDATES`, `NO_RESOLVABLE_DOMAIN`. Caller in `audit.ts` guards on `dns.found && dns.validated`.
 
 ## Website-presence detection (discovery → `discoveredUrl`)
 
@@ -74,9 +79,14 @@ ssl_valid, cms, has_social, audited_at, score_breakdown`
 - **`src/pipeline/audit-row-builders.ts`** — `buildEmptyTierRow()`, `assembleAuditRow()`, `buildRobotsDisallowedRow()`, `emptyTechStack()`. Both row factories call `computeScore()` and attach the numeric `score`; the breakdown itself is **not** persisted — the exporter recomputes it via `rebuildScoreInput()`.
 - **`src/pipeline/audit.ts`** — `buildTierARow()` calls `computeScore()` once per Tier-A candidate.
 - **Export-time `score_breakdown` assembly** — `src/pipeline/export.ts`:
-  - `rowToExportShape(row, opts)` — reads the persisted audit row, rebuilds `ScoreInput` via `rebuildScoreInput()`, calls `scoreBreakdown()`, compares the sum against the stored `row.score`.
+  - `rowToExportShape(row, opts)` — reads the persisted audit row, calls `assertExportInvariants(row)` first, then rebuilds `ScoreInput` via `rebuildScoreInput()`, calls `scoreBreakdown()`, compares the sum against the stored `row.score`. `ExportRow.score` is typed `number | null`; `filterRows` drops null-score rows and `sortRows` sinks them with `-Infinity`.
+  - `assertExportInvariants(row)` (FIX 3) — four hard throws on inconsistent persisted state:
+    1. score non-null → tier non-null
+    2. intent_tier non-null → score non-null (unless intent_tier ∈ `AUDIT_ERROR_INTENT_TIERS = {AUDIT_ERROR, TIMEOUT}`)
+    3. tier='C' → intent_tier ∈ `TIER_C_ALLOWED_INTENT_TIERS = {null, AUDIT_ERROR, TIMEOUT, PARKED}` (DEAD on a C-row throws — DEAD lives on B3 post-FIX-4, PARKED is the only C-bucket intent with a numeric score)
+    4. tier='C' with a null/error intent_tier → score must be null. FIX 3 removed the earlier `row.score ?? recomputed` fallback so this invariant actually fires instead of being silently papered over.
   - `HAS_STRUCTURED_DATA` inference block: since this signal is *not* persisted on `audit_results`, a gap of exactly `+1` between recomputed and stored score injects a synthetic `{key:"HAS_STRUCTURED_DATA", delta:-1}` entry. Any other non-zero gap emits a WARN.
-  - See open-work-item #22 in `CLAUDE.md`.
+  - See open-work-items #22 in `CLAUDE.md`.
 
 ## Results serialization
 
@@ -90,7 +100,8 @@ ssl_valid, cms, has_social, audited_at, score_breakdown`
 - **`src/db/schema.sqlite.ts`** — `auditResults` table definition; `AuditResult` = `auditResults.$inferSelect`. `score_breakdown` is not a column; computed at export time.
 - **`src/db/schema.pg.ts`** — Postgres mirror of the SQLite schema.
 - **`src/db/schema.ts`** — Re-export façade; app code MUST import from here, not from the dialect-specific files.
-- **`src/db/migrations/sqlite/*.sql`** — `0000_init`, `0001_audit_results`, `0002_intent_tier`, `0003_lead_outcomes`.
+- **`src/db/migrations/sqlite/*.sql`** — `0000_init`, `0001_audit_results`, `0002_intent_tier`, `0003_lead_outcomes`. SQLite has no CHECK constraint on `intent_tier` (the SQLite driver never emitted one), so FIX 4's DEAD_WEBSITE value needs no SQLite migration.
+- **`src/db/migrations/pg/*.sql`** — PG mirror. `0004_intent_tier_dead_website` drops and recreates `audit_results_intent_tier_check` to include DEAD_WEBSITE (FIX 4).
 
 ## Domain models
 
