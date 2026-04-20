@@ -1,0 +1,44 @@
+[
+  {
+    "id": "R1_broken_site",
+    "placeId": "osm:node:100000001",
+    "name": "Café Kleinmeister",
+    "address": "Wipplingerstraße 14, 1010 Wien",
+    "plz": "1010",
+    "district": "Innere Stadt",
+    "types": ["amenity=cafe"],
+    "primaryType": "cafe",
+    "website": "https://www.kleinmeister-cafe.at",
+    "phone": "+43 1 555 1010",
+    "lat": 48.2105,
+    "lng": 16.3695
+  },
+  {
+    "id": "R2_chain_branch",
+    "placeId": "osm:node:100000002",
+    "name": "EUROSPAR Wien Landstraßer Hauptstraße 146",
+    "address": "Landstraßer Hauptstraße 146, 1030 Wien",
+    "plz": "1030",
+    "district": "Landstraße",
+    "types": ["shop=supermarket", "brand:Spar"],
+    "primaryType": "supermarket",
+    "website": "https://www.spar.at/standorte/eurospar-wien-1030-landstrasser-hauptstrasse-146",
+    "phone": "+43 1 711 11 0",
+    "lat": 48.1987,
+    "lng": 16.3921
+  },
+  {
+    "id": "R3_nameless_osm",
+    "placeId": "osm:node:100000003",
+    "name": null,
+    "address": "Landstraße 5, 1030 Wien",
+    "plz": "1030",
+    "district": "Landstraße",
+    "types": ["shop=convenience"],
+    "primaryType": "convenience_store",
+    "website": null,
+    "phone": null,
+    "lat": 48.2054,
+    "lng": 16.3916
+  }
+]
