@@ -415,29 +415,29 @@ describe("stage1 regression lock", () => {
     `);
     expect(r3).toMatchInlineSnapshot(`
       {
-        "address": null,
+        "address": "Landstraße 5, 1030 Wien",
         "audited_at": 2026-04-20T12:00:00.000Z,
         "cms": "",
-        "coverage": "",
+        "coverage": "A",
         "email": null,
         "email_is_generic": false,
         "has_social": false,
         "impressum_complete": null,
-        "intent_tier": null,
+        "intent_tier": "NONE",
         "name": "",
         "phone": null,
         "place_id": "osm:node:100000003",
-        "plz": null,
+        "plz": "1030",
         "psi_mobile_performance": null,
-        "score": 9,
+        "score": 10,
         "score_breakdown": [
           {
-            "delta": 9,
-            "key": "DEAD_WEBSITE",
+            "delta": 10,
+            "key": "NO_WEBSITE",
           },
         ],
         "ssl_valid": null,
-        "tier": "C",
+        "tier": "B3",
         "uid": null,
         "url": null,
       }

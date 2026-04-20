@@ -12,7 +12,7 @@ import {
 // taking several seconds and blowing the 5s test timeout. Mocked to null
 // so the discovery path falls through to enrichment immediately.
 vi.mock("../../src/pipeline/dns-probe.js", () => ({
-  discoverViaDns: async () => null,
+  discoverViaDns: async () => ({ found: false, reason: "DNS_PROBE_DISABLED" }),
 }));
 import { readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";

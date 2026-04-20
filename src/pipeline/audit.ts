@@ -305,7 +305,7 @@ async function runDiscovery(candidate: PlaceCandidate): Promise<DiscoveryOutcome
     return await probeHome(candidate.website, "osm-tag", base);
   }
   const dns = await discoverViaDns(candidate);
-  if (dns?.validated) {
+  if (dns.found && dns.validated) {
     return await probeHome(dns.candidateUrl, "dns-probe", base);
   }
   const cse = await discoverViaCse(candidate);

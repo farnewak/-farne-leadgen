@@ -3,15 +3,31 @@ import type { PlaceCandidate } from "../models/types.js";
 import { slugify, stripUmlauts } from "../lib/normalize.js";
 import { fetchUrl } from "../lib/http-fetch.js";
 
-export interface DnsProbeResult {
-  candidateUrl: string;
-  resolved: boolean;
-  validated: boolean;
-}
+// Discriminated-union return so callers cannot accidentally probe a
+// nameless candidate or run with the feature disabled. Previously
+// `discoverViaDns` returned `null` on miss AND also threw on a null
+// candidate name; the new contract surfaces every skip reason by name
+// so observability can count them without log-parsing.
+export type DnsProbeSkipReason =
+  | "DNS_PROBE_DISABLED"
+  | "NO_NAME"
+  | "BRANCH_NAME"
+  | "NO_CANDIDATES"
+  | "NO_RESOLVABLE_DOMAIN";
+
+export type DnsProbeResult =
+  | { found: true; candidateUrl: string; validated: boolean }
+  | { found: false; reason: DnsProbeSkipReason };
 
 // DNS labels may not exceed 63 chars per RFC 1035. Filtering keeps us from
 // generating guaranteed-invalid candidates that would only cost DNS round-trips.
 const DNS_LABEL_MAX = 63;
+
+// Branch-location names (franchise/chain branches) should not trigger DNS
+// guesses — the guessed `{branch-name}.at` domain almost never belongs to
+// the branch, and when it does it's typically a parking page. Match on
+// the folded-lowercase name.
+const BRANCH_NAME_TOKENS = ["filiale", "standort", "zweigstelle"] as const;
 
 // Six deterministic URL guesses per name. Order matters: .at dominates Vienna
 // SMEs, so it sits first. First-word-only variants (last entry) are a long-tail
@@ -68,7 +84,7 @@ export function validatesCandidate(
   // collapses everything into one big string, which is useless for token-
   // matching. Here we fold umlauts + lowercase, then split on non-alphanum.
   const nameWords =
-    stripUmlauts(c.name).toLowerCase().match(/[a-z0-9]+/g) ?? [];
+    stripUmlauts(c.name ?? "").toLowerCase().match(/[a-z0-9]+/g) ?? [];
   const significant = nameWords.filter((w) => w.length >= 4);
 
   const nameHits = significant.filter((w) => textLower.includes(w)).length;
@@ -87,10 +103,34 @@ export function validatesCandidate(
   return false;
 }
 
+function isBranchName(name: string): boolean {
+  const folded = stripUmlauts(name).toLowerCase();
+  return BRANCH_NAME_TOKENS.some((t) => folded.includes(t));
+}
+
 export async function discoverViaDns(
   candidate: PlaceCandidate,
-): Promise<DnsProbeResult | null> {
-  const domains = generateCandidates(candidate.name);
+): Promise<DnsProbeResult> {
+  // Env-gate: opt-in only. Costs real DNS round-trips and is off by default
+  // outside production. Callers can rely on this short-circuit to ensure
+  // no DNS queries leak during tests or CSV exports.
+  if (process.env.DNS_PROBE_ENABLED !== "true") {
+    return { found: false, reason: "DNS_PROBE_DISABLED" };
+  }
+  // Null/empty/whitespace-only name must not reach slugify(). Previously
+  // `generateCandidates(null)` threw via `.replace` on null — this is the
+  // crash the Phase 1 regression snapshot captured on R3_nameless_osm.
+  const name = candidate.name;
+  if (name == null || typeof name !== "string" || name.trim() === "") {
+    return { found: false, reason: "NO_NAME" };
+  }
+  if (isBranchName(name)) {
+    return { found: false, reason: "BRANCH_NAME" };
+  }
+  const domains = generateCandidates(name);
+  if (domains.length === 0) {
+    return { found: false, reason: "NO_CANDIDATES" };
+  }
   for (const d of domains) {
     const resolved = await probeDomain(d);
     if (!resolved) continue;
@@ -98,8 +138,8 @@ export async function discoverViaDns(
     const res = await fetchUrl(url, { timeoutMs: 15_000 });
     if (res.error || res.status >= 400) continue;
     if (validatesCandidate(res.body, candidate)) {
-      return { candidateUrl: url, resolved: true, validated: true };
+      return { found: true, candidateUrl: url, validated: true };
     }
   }
-  return null;
+  return { found: false, reason: "NO_RESOLVABLE_DOMAIN" };
 }
