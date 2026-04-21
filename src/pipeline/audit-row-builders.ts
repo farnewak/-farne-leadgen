@@ -63,6 +63,15 @@ export function buildEmptyTierRow(
   now: Date,
   intentTier: IntentTier | null = null,
 ): UpsertAuditInput {
+  // Tier-C normalisation: the upstream classifier (audit.ts:classifyIntentTier)
+  // defaults tier='C' → intent_tier='DEAD', but 'DEAD' is not in the export
+  // invariant's TIER_C_ALLOWED_INTENT_TIERS set, which causes the CSV export
+  // to throw on any fetch-error row. Collapse the classifier default to 'NONE'
+  // here. 'PARKED' (set explicitly by parking-detect) and the audit-error
+  // labels ('AUDIT_ERROR', 'TIMEOUT') are preserved — they carry business
+  // meaning a C-row needs to retain.
+  const effectiveIntentTier: IntentTier | null =
+    tier === "C" && intentTier === "DEAD" ? "NONE" : intentTier;
   const env = loadEnv();
   const score = computeScore({
     tier,
@@ -76,7 +85,7 @@ export function buildEmptyTierRow(
     techStack: emptyTechStack(),
     socialLinks: {},
     hasStructuredData: false,
-    intentTier,
+    intentTier: effectiveIntentTier,
   });
   return {
     placeId: candidate.placeId,
@@ -107,7 +116,7 @@ export function buildEmptyTierRow(
     socialLinks: {},
     fetchError: discovery.fetchError,
     fetchErrorAt: discovery.fetchError ? now : null,
-    intentTier,
+    intentTier: effectiveIntentTier,
     staticSignalsExpiresAt: new Date(
       now.getTime() + env.AUDIT_STATIC_TTL_DAYS * DAY_MS,
     ),

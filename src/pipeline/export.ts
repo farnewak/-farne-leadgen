@@ -200,11 +200,14 @@ export interface RowToExportShapeOptions {
 // is also permitted (legacy / not-yet-classified error rows). PARKED is
 // included as a business-meaning label: a C-row flagged as a registered
 // parking page; score is allowed to carry the DOMAIN_REGISTERED_NO_SITE
-// bonus rather than being nulled out.
+// bonus rather than being nulled out. NONE is the default for ordinary
+// fetch-error C-rows (DNS/5xx/cert) after the Tier-C normalisation in
+// audit-row-builders.ts collapses the classifier's legacy 'DEAD' label.
 const TIER_C_ALLOWED_INTENT_TIERS = new Set<string>([
   "AUDIT_ERROR",
   "TIMEOUT",
   "PARKED",
+  "NONE",
 ]);
 
 // Intent-tier labels used for audit-error rows. These are the only
