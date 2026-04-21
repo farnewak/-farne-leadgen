@@ -59,6 +59,7 @@ function freshDb(): void {
     "0002_intent_tier.sql",
     "0003_lead_outcomes.sql",
     "0004_chain_apex_dedupe.sql",
+    "0005_last_modified_signal.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../../src/db/migrations/sqlite", f), "utf8"),
   );

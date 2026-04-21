@@ -57,6 +57,8 @@ export interface UpsertAuditInput {
   chainDetected: boolean;
   chainName: string | null;
   branchCount: number;
+  // FIX 11: last_modified year (1995..now+1) or null. Informational.
+  lastModifiedSignal: number | null;
 }
 
 export interface AuditCacheEntry {
@@ -231,5 +233,6 @@ export async function markAuditError(
     chainDetected: false,
     chainName: null,
     branchCount: 1,
+    lastModifiedSignal: null,
   });
 }

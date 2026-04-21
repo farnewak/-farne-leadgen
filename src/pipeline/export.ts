@@ -55,6 +55,11 @@ export interface ExportRow {
   // non-A tier. Appended at the end of the column order on purpose so
   // cell-index-based tests keep their offsets.
   sub_tier: SubTier;
+  // FIX 11 — site-freshness signal (year only). Null when no cascade step
+  // yielded a valid year (empty body, parsing failure, or out-of-range).
+  // Appended at the very end of the column order to preserve existing
+  // cell-index-based CSV tests.
+  last_modified_signal: number | null;
 }
 
 // Column order is the CSV header row and drives the iteration in toCsv().
@@ -85,6 +90,7 @@ export const EXPORT_COLUMNS: ReadonlyArray<keyof ExportRow> = [
   "chain_name",
   "branch_count",
   "sub_tier",
+  "last_modified_signal",
 ] as const;
 
 export interface ExportFilterOptions {
@@ -206,6 +212,7 @@ export function toJson(rows: ExportRow[]): string {
     chain_name: r.chain_name,
     branch_count: r.branch_count,
     sub_tier: r.sub_tier,
+    last_modified_signal: r.last_modified_signal,
   }));
   return JSON.stringify(out, null, 2);
 }
@@ -365,6 +372,19 @@ function assertExportInvariants(row: AuditResult): void {
       );
     }
   }
+  // FIX 11 — last_modified_signal must be null OR an integer within
+  // [MIN_YEAR, current_UTC_year + 1]. The detector already enforces this
+  // at write-time; re-check on export so a manually-tampered DB row can't
+  // surface a malformed year ("1999.5", "2099") into the CSV.
+  const lms = row.lastModifiedSignal;
+  if (lms !== null) {
+    const maxYear = new Date().getUTCFullYear() + 1;
+    if (!Number.isInteger(lms) || lms < 1995 || lms > maxYear) {
+      throw new Error(
+        `export invariant violated (row ${id}): last_modified_signal=${lms} outside [1995, ${maxYear}]`,
+      );
+    }
+  }
   // FIX 8 — sub_tier invariants. Disjoint states:
   //   sub_tier ∈ {A1,A2,A3} ⇒ tier === 'A'
   //   sub_tier === null     ⇒ tier ∈ {B1,B2,B3,C}
@@ -462,6 +482,7 @@ export function rowToExportShape(
     chain_name: row.chainName,
     branch_count: row.branchCount,
     sub_tier: computeSubTier(row.tier, row.score),
+    last_modified_signal: row.lastModifiedSignal,
   };
 }
 

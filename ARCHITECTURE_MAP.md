@@ -86,6 +86,18 @@ Two-stage chain-branch removal. Stage 1 (per-row, FIX 5) catches known chains by
 - **`src/pipeline/tech-fingerprints.ts`** — `FINGERPRINTS` (declarative list of vendor fingerprints), `MIN_MATCHES`, `Fingerprint`/`FingerprintSignal` types. Drives both CMS detection (WordPress, Wix, Jimdo, Joomla, …) and analytics/tracking/payment/cdn buckets.
 - **Exporter serialization** — `rowToExportShape()` in `src/pipeline/export.ts` flattens `techStack.cms: string[]` to the CSV `cms` column via `row.techStack.cms.join(",")`.
 
+## Audit depth — CMS + freshness
+
+Phase 4 deepens the Tier-A audit with two fail-safe detectors. Both run
+after `detectTechStack` inside `gatherSignals()` in `src/pipeline/audit.ts`.
+Any exception in a detector is swallowed, logged as a warning, and yields
+a null/fallback result — the rest of the signal pipeline always runs.
+
+- **`src/pipeline/cms-detect.ts`** — `detectCms({body, headers, existingCms}) → {cms: CmsSlug}`. 4-step cascade, first-match-wins: (A) reuse an existing high-confidence fingerprint from `detectTechStack` when its slug is in `CANONICAL_CMS_SLUGS`; (B) parse `<meta name="generator">` content via `GENERATOR_TOKEN_MAP`; (C) inspect `x-powered-by`, `x-generator`, `x-drupal-cache`, `x-typo3-parsedbody`, `x-shopify-stage` headers (bare `PHP/x.y` never sets cms); (D) asset-path fingerprints (`/wp-content/`, `/sites/default/`, `/typo3conf/`, `/_next/`, `/_nuxt/`, `cdn.shopify.com`, `wixstatic.com`, `webflow.com`, `jimdo.com`, `weebly.com`, …); (E) body non-empty → `static_or_custom`; `unknown` reserved for fetch-error rows only. Output replaces `tech.cms` in place (`tech.cms = [cmsResult.cms]`) so the CSV column stays single-valued.
+- **`src/pipeline/last-modified-detect.ts`** — `detectLastModifiedYear({body, headers, now?}) → {year: number | null}`. 3-step cascade: (1) footer copyright regex `©|&copy; … (19|20)YY(-YY)?` (ranges take the second year; MAX across matches); (2) HTTP `Last-Modified` header (case-insensitive, `Date.parse`); (3) `<time datetime="…">` + `<meta property="article:modified_time">` content (MAX year). Year sanity clamp `[MIN_YEAR=1995, now.getUTCFullYear()+1]` — out-of-range values collapse to null per-match. Each step is wrapped in `safeStep()`; year-only (no month/day) is enough for Phase-4 segmentation. Result surfaced through `GatheredSignals.lastModifiedSignal` → `audit_results.last_modified_signal` (migration `0005_last_modified_signal.sql`) → CSV column `last_modified_signal` (appended at EOL of `EXPORT_COLUMNS`).
+- **Scoring impact** — `detectCms` renames weight `WIX_OR_JIMDO` → `WIX_OR_JIMDO_OR_WEEBLY` (still +2, single-fire). Tier-A ceiling stays 19; `NO_WEBSITE_PENALTY=20` anchor unchanged. `last_modified_signal` is **informational only** in Phase 4 — no weight; Phase 7 will use it to segment addressable markets by site freshness.
+- **Export invariants** — `assertExportInvariants()` now enforces `last_modified_signal ∈ {null} ∪ {integer ∈ [1995, current_UTC_year+1]}` so a tampered DB row cannot surface a malformed year through the CSV.
+
 ## Static signal extraction (Tier-A only)
 
 - **`src/pipeline/ssl-check.ts`** — `checkTransport(host)`. Resolves `sslValid`, `sslExpiresAt`, `httpToHttpsRedirect`.

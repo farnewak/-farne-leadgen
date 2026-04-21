@@ -28,6 +28,7 @@ import { checkTransport } from "./ssl-check.js";
 import { checkViewport } from "./viewport-check.js";
 import { detectTechStack } from "./tech-stack.js";
 import { detectCms } from "./cms-detect.js";
+import { detectLastModifiedYear } from "./last-modified-detect.js";
 import { extractSocialLinks } from "./social-links.js";
 import { detectSchemaOrg } from "./schema-org.js";
 import { fetchAndParseImpressum } from "./impressum.js";
@@ -561,6 +562,11 @@ async function gatherSignals(
   // detector collapses to "unknown".
   const cmsResult = detectCms({ body, headers, existingCms: tech.cms });
   tech.cms = [cmsResult.cms];
+  // FIX 11 — cascaded last-modified detector. Fail-safe by construction: on
+  // any internal exception the module logs a warning and returns null, so
+  // the rest of the signal pipeline still runs. Result is informational
+  // (no scoring impact in Phase 4).
+  const { year: lastModifiedSignal } = detectLastModifiedYear({ body, headers });
   return {
     ssl,
     viewport: checkViewport(body),
@@ -568,5 +574,6 @@ async function gatherSignals(
     social: extractSocialLinks(body),
     schema: detectSchemaOrg(body),
     impressum,
+    lastModifiedSignal,
   };
 }

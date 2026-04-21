@@ -165,6 +165,11 @@ export const auditResults = sqliteTable(
       .default(false),
     chainName: text("chain_name"),
     branchCount: integer("branch_count").notNull().default(1),
+    // FIX 11: site-freshness signal (year only, nullable). Populated by the
+    // cascaded copyright/Last-Modified/time-tag detector in Phase 4.
+    // Informational — no direct scoring impact in Phase 4; Phase 7 will use
+    // it to segment addressable markets by site freshness.
+    lastModifiedSignal: integer("last_modified_signal"),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

@@ -184,6 +184,9 @@ export const auditResults = pgTable(
     chainDetected: boolean("chain_detected").notNull().default(false),
     chainName: text("chain_name"),
     branchCount: integer("branch_count").notNull().default(1),
+    // FIX 11: site-freshness signal (year only, nullable). See
+    // schema.sqlite.ts for semantics. PG mirror stays in lock-step.
+    lastModifiedSignal: integer("last_modified_signal"),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

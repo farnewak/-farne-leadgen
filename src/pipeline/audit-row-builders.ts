@@ -34,6 +34,9 @@ export interface GatheredSignals {
   social: SocialLinks;
   schema: ReturnType<typeof detectSchemaOrg>;
   impressum: ImpressumData;
+  // FIX 11: last_modified year (or null if no signal). Populated by
+  // detectLastModifiedYear in audit.ts:gatherSignals.
+  lastModifiedSignal: number | null;
 }
 
 export function emptyTechStack(): TechStackSignals {
@@ -114,6 +117,9 @@ export function buildEmptyTierRow(
     chainDetected: false,
     chainName: null,
     branchCount: 1,
+    // FIX 11: empty-tier rows never run the last-modified detector
+    // (no home body to scan), so the signal is null by construction.
+    lastModifiedSignal: null,
   };
 }
 
@@ -171,6 +177,9 @@ export function assembleAuditRow(
     chainDetected: false,
     chainName: null,
     branchCount: 1,
+    // FIX 11: carry the detector's verdict straight through. Null when
+    // no cascade step produced a valid year.
+    lastModifiedSignal: signals.lastModifiedSignal,
   };
 }
 

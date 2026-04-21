@@ -78,6 +78,7 @@ function freshDb(): void {
     "0002_intent_tier.sql",
     "0003_lead_outcomes.sql",
     "0004_chain_apex_dedupe.sql",
+    "0005_last_modified_signal.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../src/db/migrations/sqlite", f), "utf8"),
   );
@@ -189,6 +190,10 @@ function hydrateRow(row: Record<string, unknown>): AuditResult {
     chainDetected: asBool(row.chain_detected) ?? false,
     chainName: (row.chain_name as string | null) ?? null,
     branchCount: Number(row.branch_count ?? 1),
+    lastModifiedSignal:
+      row.last_modified_signal == null
+        ? null
+        : Number(row.last_modified_signal),
   };
 }
 
@@ -409,6 +414,7 @@ describe("stage1 regression lock", () => {
         "has_social": false,
         "impressum_complete": false,
         "intent_tier": "LIVE",
+        "last_modified_signal": null,
         "name": "Kleinmeister-Cafe",
         "phone": null,
         "place_id": "osm:node:100000001",
@@ -470,6 +476,7 @@ describe("stage1 regression lock", () => {
         "has_social": false,
         "impressum_complete": null,
         "intent_tier": "DEAD_WEBSITE",
+        "last_modified_signal": null,
         "name": "",
         "phone": null,
         "place_id": "osm:node:100000003",
@@ -499,5 +506,11 @@ describe("stage1 regression lock", () => {
     expect(r6.cms).toBe("wordpress");
     expect(r6.sub_tier).toBe("A1");
     expect(r6.score).toBe(14);
+    // FIX 11: "© 2020 …" in the footer is picked up by the copyright
+    // regex step of the last-modified cascade. R1/R3 have no freshness
+    // signal (body has no copyright / tier-B3 path skips detector).
+    expect(r6.last_modified_signal).toBe(2020);
+    expect(r1.last_modified_signal).toBe(null);
+    expect(r3.last_modified_signal).toBe(null);
   });
 });

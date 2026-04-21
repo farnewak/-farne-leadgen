@@ -67,6 +67,7 @@ function branchRow(
     chainDetected: false,
     chainName: null,
     branchCount: 1,
+    lastModifiedSignal: null,
   };
 }
 
@@ -311,6 +312,7 @@ describe("dedupeChainApices", () => {
       chainDetected: true,
       chainName: null,
       branchCount: 3,
+      lastModifiedSignal: null,
     };
     expect(() => rowToExportShape(bad, { warn: () => {} })).toThrow(
       /forged:1.*chain_detected=true.*chain_name is null/,
@@ -355,6 +357,7 @@ describe("dedupeChainApices", () => {
       chainDetected: false,
       chainName: null,
       branchCount: 3,
+      lastModifiedSignal: null,
     };
     expect(() => rowToExportShape(bad, { warn: () => {} })).toThrow(
       /forged:2.*branch_count=3/,
