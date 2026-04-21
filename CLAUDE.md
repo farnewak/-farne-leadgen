@@ -88,11 +88,18 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
 14. CSE-basiertes B1/B2-Tier-Mining: wenn Discovery keine eigene Website
     findet aber CSE-Treffer auf Social/Directory-Hosts liefert, Tier B1/B2
     statt B3 vergeben (aktuell pauschal B3).
-22. Schema-Migration `has_structured_data` (bool) auf `audit_results` —
-    aktuell via Export-Time-Inference aus dem score-gap zwischen stored
-    und recomputed gefüllt (siehe `rowToExportShape` in
-    `src/pipeline/export.ts`). Bei Migration: Inference-Block entfernen
-    und Spalte in `rebuildScoreInput()` verdrahten.
+22. [RESOLVED IN THIS PR] Schema-Migration `has_structured_data` (bool)
+    auf `audit_results`. Migration `0006_has_structured_data.sql` fügt
+    die Spalte (nullable, boolean-mode) hinzu. `assembleAuditRow`
+    persistiert `signals.schema.hasSchemaOrg`, `buildEmptyTierRow`
+    setzt `false`. `rebuildScoreInput()` in `src/pipeline/export.ts`
+    liest jetzt `row.hasStructuredData ?? false` direkt — die
+    Export-Time-Inference (score-gap = 1 → HAS_STRUCTURED_DATA) ist
+    entfernt. Legacy-Rows ohne Spalte (null) verlieren den Bonus in
+    der breakdown und erzeugen ggf. eine "(unexplained)"-WARN —
+    akzeptierter Trade-Off, dokumentiert in T-Inf-1b. `FEATURE_KEYS`
+    in `src/cli/export-labels.ts` um `hasStructuredData` +
+    `lastModifiedSignal` erweitert für das Training-JSONL.
 23. [RESOLVED] Discovery-Resilience: per-seed Source-Fallback
     in `src/pipeline/discover.ts`. Bei Overpass-504/Timeout/beliebiger
     Exception einer Source fällt die Pipeline jetzt auf die nächste

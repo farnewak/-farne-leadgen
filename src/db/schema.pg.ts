@@ -187,6 +187,8 @@ export const auditResults = pgTable(
     // FIX 11: site-freshness signal (year only, nullable). See
     // schema.sqlite.ts for semantics. PG mirror stays in lock-step.
     lastModifiedSignal: integer("last_modified_signal"),
+    // #22: persisted schema.org/JSON-LD signal. See schema.sqlite.ts.
+    hasStructuredData: boolean("has_structured_data"),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

@@ -109,6 +109,7 @@ function auditRow(overrides: Partial<AuditResult> = {}): AuditResult {
     chainName: null,
     branchCount: 1,
     lastModifiedSignal: null,
+    hasStructuredData: false,
     ...overrides,
   } as AuditResult;
 }
@@ -309,19 +310,18 @@ describe("rowToExportShape", () => {
     expect(warned[0]).toMatch(/\(unexplained\)/);
   });
 
-  // Inference-Patch (§K): HAS_STRUCTURED_DATA is not persisted on
-  // audit_results, so rebuildScoreInput assumes false. A gap of exactly
-  // +1 between recomputed and stored is mathematically unambiguous and
-  // gets inferred into the breakdown silently (no warn).
-  it("T-Inf-1: gap=1 → HAS_STRUCTURED_DATA injected, breakdown sum == stored", () => {
+  // #22: HAS_STRUCTURED_DATA is now persisted on audit_results. The
+  // exporter no longer infers it from the score gap; scoreBreakdown()
+  // emits the entry directly when row.hasStructuredData is true.
+  it("T-Inf-1: hasStructuredData=true → HAS_STRUCTURED_DATA in breakdown, no warn", () => {
     const warned: string[] = [];
-    // Signals that sum to 8 pre-inference:
+    // Signals that sum to 7 with schema.org bonus:
     //   NO_SSL +3, NO_HTTPS_REDIRECT +2, NO_ANALYTICS +1,
-    //   NO_MODERN_TRACKING +1, NO_SOCIAL_LINKS +1 = 8
-    // stored=7 → gap=1 → inference injects HAS_STRUCTURED_DATA -1.
+    //   NO_MODERN_TRACKING +1, NO_SOCIAL_LINKS +1, HAS_STRUCTURED_DATA -1 = 7.
     const db = auditRow({
       sslValid: false,
       httpToHttpsRedirect: false,
+      hasStructuredData: true,
       score: 7,
     });
     const shape = rowToExportShape(db, { warn: (m) => warned.push(m) });
@@ -331,6 +331,25 @@ describe("rowToExportShape", () => {
     expect(shape.score_breakdown.map((e) => e.key)).toContain(
       "HAS_STRUCTURED_DATA",
     );
+  });
+
+  // #22: legacy row (hasStructuredData=null) where the auditor DID fire
+  // HAS_STRUCTURED_DATA at audit-time but the column was unavailable.
+  // rebuildScoreInput coerces null→false, so recomputed > stored by 1 and
+  // the generic "(unexplained)" warn fires. This is the deliberate cost of
+  // dropping the inference block — operators see the legacy drift instead
+  // of having it silently papered over.
+  it("T-Inf-1b: legacy hasStructuredData=null with gap=1 → warn '(unexplained)'", () => {
+    const warned: string[] = [];
+    const db = auditRow({
+      sslValid: false,
+      httpToHttpsRedirect: false,
+      hasStructuredData: null,
+      score: 7,
+    });
+    rowToExportShape(db, { warn: (m) => warned.push(m) });
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatch(/\(unexplained\)/);
   });
 
   it("T-Inf-2: recomputed == stored → no injection, no warn", () => {

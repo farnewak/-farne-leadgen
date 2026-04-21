@@ -120,6 +120,10 @@ export function buildEmptyTierRow(
     // FIX 11: empty-tier rows never run the last-modified detector
     // (no home body to scan), so the signal is null by construction.
     lastModifiedSignal: null,
+    // #22: empty-tier rows never run detectSchemaOrg. `false` matches the
+    // `hasStructuredData: false` passed into computeScore above, so the
+    // stored score stays reproducible from the row.
+    hasStructuredData: false,
   };
 }
 
@@ -180,6 +184,9 @@ export function assembleAuditRow(
     // FIX 11: carry the detector's verdict straight through. Null when
     // no cascade step produced a valid year.
     lastModifiedSignal: signals.lastModifiedSignal,
+    // #22: persist the schema.org signal so the exporter no longer has
+    // to infer it from the score gap.
+    hasStructuredData: signals.schema.hasSchemaOrg,
   };
 }
 

@@ -247,11 +247,9 @@ export function extractPlzFromAddress(address: string | null): string | null {
 }
 
 function rebuildScoreInput(row: AuditResult): ScoreInput {
-  // hasStructuredData is computed at audit-time but not persisted on
-  // audit_results — see src/db/schema.sqlite.ts. The rebuild therefore
-  // assumes `false`, which means HAS_STRUCTURED_DATA-1 will be absent from
-  // the breakdown for rows where the signal WAS present at audit time.
-  // The mismatch-warn in rowToExportShape surfaces this as "stored < recomputed".
+  // #22: hasStructuredData is now persisted on audit_results. Legacy rows
+  // pre-migration carry null; coerce to `false` so their breakdown stays
+  // stable (the mismatch-warn surfaces any remaining gap as "unexplained").
   return {
     tier: row.tier,
     sslValid: row.sslValid,
@@ -263,7 +261,7 @@ function rebuildScoreInput(row: AuditResult): ScoreInput {
     impressumUid: row.impressumUid,
     techStack: row.techStack,
     socialLinks: row.socialLinks,
-    hasStructuredData: false,
+    hasStructuredData: row.hasStructuredData ?? false,
     intentTier: row.intentTier,
   };
 }
@@ -431,24 +429,12 @@ export function rowToExportShape(
   const breakdown = scoreBreakdown(input);
   const recomputed = clampScore(breakdown.reduce((s, e) => s + e.delta, 0));
 
-  // HAS_STRUCTURED_DATA inference. rebuildScoreInput() assumes
-  // hasStructuredData=false (the signal is not persisted on audit_results),
-  // so any row audited with structured-data detection will show
-  // recomputed = stored + 1. HAS_STRUCTURED_DATA is the ONLY -1-weighted
-  // signal that is not schema-persisted (PSI_EXCELLENT rebuilds from
-  // psi_mobile_performance). A gap of exactly +1 is therefore
-  // mathematically unambiguous — inject the entry so breakdown sums match
-  // the stored score, and suppress the WARN for this specific case.
-  //
-  // When has_structured_data is migrated into audit_results (open-work-
-  // item #22), remove this inference block and add the column to
-  // rebuildScoreInput() instead.
-  if (row.score !== null && recomputed - row.score === 1) {
-    breakdown.push({
-      key: "HAS_STRUCTURED_DATA",
-      delta: -1,
-    });
-  } else if (row.score !== null && row.score !== recomputed) {
+  // #22: has_structured_data is persisted, so scoreBreakdown() already emits
+  // HAS_STRUCTURED_DATA when appropriate — no export-time inference needed.
+  // Any remaining mismatch is a genuine data bug (hand-forged row, schema
+  // drift, or pre-#22 legacy row with hasStructuredData=null where the
+  // auditor used true). Surface it as "(unexplained)" so operators notice.
+  if (row.score !== null && row.score !== recomputed) {
     const msg = `WARN export: row ${row.placeId} score mismatch stored=${row.score} recomputed=${recomputed} (unexplained)`;
     if (opts.warn) opts.warn(msg);
     else process.stderr.write(`${msg}\n`);

@@ -40,6 +40,7 @@ function freshDb(): void {
     "0003_lead_outcomes.sql",
     "0004_chain_apex_dedupe.sql",
     "0005_last_modified_signal.sql",
+    "0006_has_structured_data.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../../src/db/migrations/sqlite", f), "utf8"),
   );
@@ -227,11 +228,12 @@ describe("leadgen export CLI (integration)", () => {
     expect((parsed as unknown[]).length).toBe(10);
   });
 
-  // T-Inf-4: seed a Tier-A row whose stored score is 1 less than what the
-  // rebuilt signals would recompute (simulating has_structured_data having
-  // fired at audit-time but not being persisted). Export must emit no WARN
-  // and the breakdown deltas must sum to the stored score.
-  it("T-Inf-4: structured-data gap=1 row → no stderr, breakdown sum == score", async () => {
+  // T-Inf-4 (#22): seed a Tier-A row whose stored score includes the
+  // HAS_STRUCTURED_DATA-1 bonus. With the column now persisted,
+  // rebuildScoreInput reads it directly and scoreBreakdown emits the entry
+  // naturally — no inference, no WARN, and the breakdown deltas sum to the
+  // stored score.
+  it("T-Inf-4: has_structured_data=1 row → no stderr, breakdown sum == score", async () => {
     const sql = new Database(TMP_DB);
     const tierATech = JSON.stringify({
       cms: [],
@@ -243,7 +245,7 @@ describe("leadgen export CLI (integration)", () => {
     });
     const tierASocial = JSON.stringify({ facebook: "https://facebook.com/x" });
     const now = new Date("2026-04-10T00:00:00.000Z").getTime();
-    // Signal mix: NO_SSL+3 = 3 pre-inference. stored=2 → gap=1.
+    // Signal mix: NO_SSL+3 + HAS_STRUCTURED_DATA-1 = 2. stored=2, no gap.
     sql
       .prepare(
         `INSERT INTO audit_results (
@@ -253,10 +255,10 @@ describe("leadgen export CLI (integration)", () => {
           impressum_present, impressum_uid, impressum_company_name,
           impressum_address, impressum_complete,
           tech_stack, generic_emails, social_links,
-          static_signals_expires_at, score
+          static_signals_expires_at, score, has_structured_data
         ) VALUES (?, ?, 'A', ?, 'osm-tag', 0, 1, 1, 80, 1, 'ATU12345678',
                   'Structured GmbH', 'Mariahilferstr 1, 1060 Wien', 1,
-                  ?, '[]', ?, ?, ?)`,
+                  ?, '[]', ?, ?, ?, 1)`,
       )
       .run(
         "structured-p",

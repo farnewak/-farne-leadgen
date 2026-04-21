@@ -170,6 +170,11 @@ export const auditResults = sqliteTable(
     // Informational — no direct scoring impact in Phase 4; Phase 7 will use
     // it to segment addressable markets by site freshness.
     lastModifiedSignal: integer("last_modified_signal"),
+    // #22: persisted schema.org/JSON-LD signal. Replaces the export-time
+    // inference block in rowToExportShape — scores are now reproducible
+    // purely from the row. Nullable for legacy rows audited before this
+    // migration; `rebuildScoreInput` coerces null to `false`.
+    hasStructuredData: integer("has_structured_data", { mode: "boolean" }),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

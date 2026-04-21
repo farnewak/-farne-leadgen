@@ -221,8 +221,7 @@ ordination, rezeption, empfang, anfrage, office1).
     5. `chain_detected=true` ⇒ `chain_name` non-null ∧ `branch_count ≥ 2`; `chain_detected=false` ⇒ `chain_name=null` ∧ `branch_count=1`
     6. `sub_tier ∈ {A1,A2,A3}` ⇒ `tier='A'`; `tier='A'` with non-null score ⇒ `sub_tier ≠ null`
     7. `email_is_generic ∈ {0,1}` ⇒ email non-null; `email_is_generic=null` ⇒ email null (or malformed without `@`)
-  - `HAS_STRUCTURED_DATA` inference block: since this signal is *not* persisted on `audit_results`, a gap of exactly `+1` between recomputed and stored score injects a synthetic `{key:"HAS_STRUCTURED_DATA", delta:-1}` entry. Any other non-zero gap emits a WARN.
-  - See open-work-items #22 in `CLAUDE.md`.
+  - `HAS_STRUCTURED_DATA` is now persisted on `audit_results.has_structured_data` (migration 0006) and read directly by `rebuildScoreInput()`. The previous export-time inference block (score-gap=+1 → synthetic entry) has been removed; any non-zero gap now emits an "(unexplained)" WARN. Legacy rows predating the migration expose `null` → coerced to `false`, so rows whose stored score included the `-1` bonus will show a gap of 1 and trigger the WARN — acceptable trade-off, documented in `tests/unit/export.test.ts` (T-Inf-1b).
 
 ## Results serialization
 

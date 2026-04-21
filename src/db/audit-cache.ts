@@ -59,6 +59,9 @@ export interface UpsertAuditInput {
   branchCount: number;
   // FIX 11: last_modified year (1995..now+1) or null. Informational.
   lastModifiedSignal: number | null;
+  // #22: persisted schema.org/JSON-LD signal. Null on legacy rows only;
+  // all post-#22 writes set either `true` or `false`.
+  hasStructuredData: boolean | null;
 }
 
 export interface AuditCacheEntry {
@@ -234,5 +237,6 @@ export async function markAuditError(
     chainName: null,
     branchCount: 1,
     lastModifiedSignal: null,
+    hasStructuredData: null,
   });
 }
