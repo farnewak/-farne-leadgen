@@ -66,6 +66,36 @@ describe("chain-branch-filter (FIX 5) — pattern matching", () => {
     const m = matchesChainBranch("https://www.spar.at/", patterns);
     expect(m).toBeNull();
   });
+
+  it("matches an oberlaa-wien.at branch URL", () => {
+    const m = matchesChainBranch(
+      "https://www.oberlaa-wien.at/cafe-oberlaa-stephansplatz",
+      patterns,
+    );
+    expect(m).not.toBeNull();
+    expect(m?.chain_name).toBe("Oberlaa");
+    expect(m?.matched_pattern).toBe("oberlaa-wien.at/*");
+  });
+
+  it("does NOT match plain oberlaa-wien.at/ homepage", () => {
+    const m = matchesChainBranch("https://oberlaa-wien.at/", patterns);
+    expect(m).toBeNull();
+  });
+
+  it("matches a dermann.at/filiale branch URL", () => {
+    const m = matchesChainBranch(
+      "https://www.dermann.at/filiale/graben",
+      patterns,
+    );
+    expect(m).not.toBeNull();
+    expect(m?.chain_name).toBe("Dermann");
+    expect(m?.matched_pattern).toBe("dermann.at/filiale/*");
+  });
+
+  it("does NOT match dermann.at/ubersicht (non-filiale path)", () => {
+    const m = matchesChainBranch("https://dermann.at/ubersicht", patterns);
+    expect(m).toBeNull();
+  });
 });
 
 describe("chain-branch-filter (FIX 5) — CSV append", () => {
