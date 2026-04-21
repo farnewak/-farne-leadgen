@@ -13,6 +13,13 @@ import {
 } from "./enrich.js";
 import type { ScrapedContact } from "../tools/enrich/impressum-scraper.js";
 import { discoverLeads } from "./discover.js";
+import {
+  loadChainBranchPatterns,
+  matchesChainBranch,
+  appendFilteredChainBranchLog,
+  type ChainBranchPattern,
+} from "./chain-filter.js";
+import { resolve } from "node:path";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
 import { classifyTier } from "./tier-classifier.js";
@@ -69,7 +76,20 @@ export interface AuditRunOptions {
   // at a throwaway temp dir so runs don't leak into production caches.
   impressumFetch?: typeof import("../lib/http-fetch.js").fetchUrl;
   impressumCacheDir?: string;
+  // FIX 5: chain-branch filter hooks. `chainBranchesConfig` points at a
+  // custom YAML file (default: ./config/chain_branches.yml). `logDir` is
+  // the directory where logs/filtered_chain_branches.csv lands — tests
+  // redirect it to a tmp dir so real `logs/` is never touched.
+  chainBranchesConfig?: string;
+  logDir?: string;
 }
+
+// Default locations. `logs/` is created lazily on first filter-hit.
+const DEFAULT_CHAIN_BRANCHES_CONFIG = resolve(
+  process.cwd(),
+  "config/chain_branches.yml",
+);
+const DEFAULT_LOG_DIR = resolve(process.cwd(), "logs");
 
 // Top-level entry: discover candidates, fan out via the host limiter,
 // swallow per-candidate failures. One bad lead never aborts the run.
@@ -85,10 +105,15 @@ export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
       `)`,
   );
 
+  // Load chain-branch patterns once per run. Parse errors surface here
+  // rather than at per-row match time, so a malformed YAML fails the run
+  // early instead of silently dropping the filter.
+  const chainPatterns = loadChainPatternsSafe(options);
+
   let done = 0;
   const tasks = candidates.map((c) =>
     schedule(hostOf(c), async () => {
-      await processOne(c, options).catch((err) => {
+      await processOne(c, options, chainPatterns).catch((err) => {
         log.error(`audit failed for ${c.placeId}`, (err as Error).message);
       });
       done += 1;
@@ -97,6 +122,24 @@ export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
   );
   await Promise.all(tasks);
   log.info(`audit done: ${done}/${candidates.length}`);
+}
+
+function loadChainPatternsSafe(
+  options: AuditRunOptions,
+): ChainBranchPattern[] {
+  const path = options.chainBranchesConfig ?? DEFAULT_CHAIN_BRANCHES_CONFIG;
+  try {
+    return loadChainBranchPatterns(path);
+  } catch (err) {
+    // Missing default config is tolerated (e.g. fresh checkout without the
+    // YAML). A custom path that fails to load is an explicit user choice
+    // and re-thrown.
+    if (options.chainBranchesConfig) throw err;
+    log.warn(
+      `chain-branch filter disabled: ${(err as Error).message} (at ${path})`,
+    );
+    return [];
+  }
 }
 
 function hostOf(c: PlaceCandidate): string {
@@ -111,6 +154,7 @@ function hostOf(c: PlaceCandidate): string {
 async function processOne(
   candidate: PlaceCandidate,
   options: AuditRunOptions,
+  chainPatterns: ChainBranchPattern[],
 ): Promise<void> {
   if (!options.forceRefresh) {
     const cached = await checkAuditCache(candidate.placeId);
@@ -124,6 +168,32 @@ async function processOne(
     if (row === null) {
       // Dropped by enrichment (CLOSED_PERMANENTLY) — no DB row written.
       return;
+    }
+    // FIX 5: chain-branch filter. Runs AFTER parking detection (which
+    // happens inside auditOne) and BEFORE chain-apex dedupe (Phase 2B
+    // FIX 6, not yet wired). Matched rows are logged and skipped here;
+    // they never land in audit_results.
+    if (row.discoveredUrl && chainPatterns.length > 0) {
+      const match = matchesChainBranch(row.discoveredUrl, chainPatterns);
+      if (match) {
+        const logDir = options.logDir ?? DEFAULT_LOG_DIR;
+        const csvPath = resolve(logDir, "filtered_chain_branches.csv");
+        appendFilteredChainBranchLog(
+          {
+            place_id: row.placeId,
+            chain_name: match.chain_name,
+            url: row.discoveredUrl,
+            matched_pattern: match.matched_pattern,
+            reason: match.reason,
+            filtered_at: new Date(),
+          },
+          csvPath,
+        );
+        log.info(
+          `chain-branch filter: drop ${row.placeId} (${match.chain_name}, ${match.matched_pattern})`,
+        );
+        return;
+      }
     }
     if (options.onlyTier && row.tier !== options.onlyTier) return;
     await upsertAudit(row);

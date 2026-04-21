@@ -1,0 +1,66 @@
+# Chain-branch URL patterns. Entries describe branch-page URL shapes for
+# well-known Austrian B2C chains. Rows whose discovered URL matches are
+# REMOVED from the stage1 output stream and logged to
+# logs/filtered_chain_branches.csv.
+#
+# Pattern semantics:
+#   - Single `*` is greedy and matches one or more characters (including `/`).
+#   - Patterns are matched against the normalised host+path form
+#     (`<hostname-without-www><pathname>`).
+#   - Hostnames are IDN-aware: both unicode and punycode forms of the URL
+#     resolve to the same pattern entry.
+#   - `spar.at/` (plain homepage) does NOT match `spar.at/standorte/*` —
+#     chain apex-dedupe handles bad chain homepages in a later stage.
+#
+# Keep the list sorted by chain_name so diffs stay readable.
+- pattern: "anker.at/filialen*"
+  chain_name: "Anker"
+  reason: "B2C bakery chain — branch page"
+- pattern: "baeckerei-felber.at/*"
+  chain_name: "Felber"
+  reason: "B2C bakery chain — branch page"
+- pattern: "billa.at/filialen/*"
+  chain_name: "Billa"
+  reason: "B2C supermarket chain — branch page"
+- pattern: "billa-corso.at/*"
+  chain_name: "Billa Corso"
+  reason: "B2C supermarket chain — branch page"
+- pattern: "billaplus.at/*"
+  chain_name: "Billa Plus"
+  reason: "B2C supermarket chain — branch page"
+- pattern: "bipa.at/*"
+  chain_name: "Bipa"
+  reason: "B2C drugstore chain — branch page"
+- pattern: "dm.at/*"
+  chain_name: "dm"
+  reason: "B2C drugstore chain — branch page"
+- pattern: "eurospar.at/*"
+  chain_name: "Eurospar"
+  reason: "B2C supermarket chain — branch page"
+- pattern: "felber.at/*"
+  chain_name: "Felber"
+  reason: "B2C bakery chain — branch page"
+- pattern: "hofer.at/filialen*"
+  chain_name: "Hofer"
+  reason: "B2C discount-supermarket chain — branch page"
+- pattern: "libro.at/filialen*"
+  chain_name: "Libro"
+  reason: "B2C stationery chain — branch page"
+- pattern: "lidl.at/*"
+  chain_name: "Lidl"
+  reason: "B2C discount-supermarket chain — branch page"
+- pattern: "müller.at/filialen*"
+  chain_name: "Müller"
+  reason: "B2C drugstore chain — branch page"
+- pattern: "pagro.at/filialen*"
+  chain_name: "Pagro"
+  reason: "B2C stationery chain — branch page"
+- pattern: "penny.at/*"
+  chain_name: "Penny"
+  reason: "B2C discount-supermarket chain — branch page"
+- pattern: "spar.at/standorte/*"
+  chain_name: "Spar"
+  reason: "B2C supermarket chain — branch page"
+- pattern: "ströck.at/*"
+  chain_name: "Ströck"
+  reason: "B2C bakery chain — branch page"

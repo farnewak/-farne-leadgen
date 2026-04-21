@@ -50,6 +50,7 @@ import type { AuditResult } from "../src/db/schema.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TMP_DB = resolve(HERE, "tmp/stage1-regression.db");
+const TMP_LOG_DIR = resolve(HERE, "tmp/stage1-regression-logs");
 const FIXTURE_PATH = resolve(HERE, "fixtures/stage1_inputs.json");
 const FIXED_NOW = new Date("2026-04-20T12:00:00.000Z");
 
@@ -204,6 +205,14 @@ describe("stage1 regression lock", () => {
     resetRobotsCache();
     freshDb();
 
+    // FIX 5: redirect the chain-branch filter log to a tmp dir so the real
+    // repo-level `logs/` is never touched during tests. Cleaned below.
+    try {
+      rmSync(TMP_LOG_DIR, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+
     agent = new MockAgent();
     agent.disableNetConnect();
     setGlobalDispatcher(agent);
@@ -282,24 +291,49 @@ describe("stage1 regression lock", () => {
     vi.useRealTimers();
     resetEnvCache();
     __resetDbClientForTests();
+    try {
+      rmSync(TMP_LOG_DIR, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
   });
 
-  it("locks the full export row for R1/R2/R3 as-is", async () => {
+  it("locks the full export row for R1/R3 as-is (R2 filtered by FIX 5)", async () => {
     const fixtures = loadFixtures();
 
     await runAudit({
       limit: 10,
       discover: async () => fixtures,
+      logDir: TMP_LOG_DIR,
     });
 
     const rows = readAuditRows();
-    expect(rows).toHaveLength(3);
+    // FIX 5: R2 (EUROSPAR Landstraßer Hauptstraße) matches the
+    // `spar.at/standorte/*` chain-branch pattern and is removed from the
+    // stage1 output stream. Only R1 + R3 remain in the DB.
+    expect(rows).toHaveLength(2);
 
     const byId = Object.fromEntries(rows.map((r) => [r.placeId, r]));
 
+    expect(byId["osm:node:100000002"]).toBeUndefined();
+
     const r1 = rowToExportShape(byId["osm:node:100000001"]!);
-    const r2 = rowToExportShape(byId["osm:node:100000002"]!);
     const r3 = rowToExportShape(byId["osm:node:100000003"]!);
+
+    // FIX 5: verify R2 was logged to the filtered-chain-branches CSV.
+    const csvPath = resolve(TMP_LOG_DIR, "filtered_chain_branches.csv");
+    const csv = readFileSync(csvPath, "utf-8");
+    const lines = csv.trim().split("\n");
+    expect(lines[0]).toBe(
+      "place_id,chain_name,url,matched_pattern,reason,filtered_at",
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("osm:node:100000002");
+    expect(lines[1]).toContain("Spar");
+    expect(lines[1]).toContain("spar.at/standorte/*");
+    expect(lines[1]).toContain(
+      "https://www.spar.at/standorte/eurospar-wien-1030-landstrasser-hauptstrasse-146",
+    );
 
     // Snapshot the full ExportRow shape for each fixture. No hand-written
     // assertions on specific columns — this is a regression lock, not a spec.
@@ -358,59 +392,6 @@ describe("stage1 regression lock", () => {
         "tier": "A",
         "uid": null,
         "url": "https://www.kleinmeister-cafe.at",
-      }
-    `);
-    expect(r2).toMatchInlineSnapshot(`
-      {
-        "address": null,
-        "audited_at": 2026-04-20T12:00:00.000Z,
-        "cms": "",
-        "coverage": "",
-        "email": null,
-        "email_is_generic": false,
-        "has_social": false,
-        "impressum_complete": false,
-        "intent_tier": "LIVE",
-        "name": "Spar",
-        "phone": null,
-        "place_id": "osm:node:100000002",
-        "plz": null,
-        "psi_mobile_performance": null,
-        "score": 14,
-        "score_breakdown": [
-          {
-            "delta": 3,
-            "key": "NO_SSL",
-          },
-          {
-            "delta": 2,
-            "key": "NO_HTTPS_REDIRECT",
-          },
-          {
-            "delta": 3,
-            "key": "NO_MOBILE_VIEWPORT",
-          },
-          {
-            "delta": 3,
-            "key": "NO_IMPRESSUM",
-          },
-          {
-            "delta": 1,
-            "key": "NO_ANALYTICS",
-          },
-          {
-            "delta": 1,
-            "key": "NO_MODERN_TRACKING",
-          },
-          {
-            "delta": 1,
-            "key": "NO_SOCIAL_LINKS",
-          },
-        ],
-        "ssl_valid": false,
-        "tier": "A",
-        "uid": null,
-        "url": "https://www.spar.at/standorte/eurospar-wien-1030-landstrasser-hauptstrasse-146",
       }
     `);
     expect(r3).toMatchInlineSnapshot(`
