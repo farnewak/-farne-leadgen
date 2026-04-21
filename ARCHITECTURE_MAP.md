@@ -50,6 +50,36 @@ ssl_valid, cms, has_social, audited_at, score_breakdown`
 - **`src/pipeline/classify.ts`** — `classifyIndustry(types, primaryType)`, `primaryCategoryKey()`. Maps OSM/Places types → 7-industry bucket.
 - **`src/pipeline/classify-osm.ts`** — `OSM_TAG_TO_GPLACES_KEY`, `findOsmTagKey(tags)`. OSM `key=value` → Places primary-type mapping.
 
+## Chain handling
+
+Two-stage chain-branch removal. Stage 1 (per-row, FIX 5) catches known chains by URL pattern; Stage 2 (batch, FIX 6) catches unknown chains by apex-domain repetition. Both stages log to CSV for audit trail; neither stage touches `audit_results` directly beyond the chain-columns on the canonical collapsed row.
+
+**Stage 1 — `src/pipeline/chain-filter.ts`** (per-row, post-audit, pre-dedupe)
+- `loadChainBranchPatterns(path)` parses `config/chain_branches.yml` (17 seeded Austrian B2C chains).
+- `matchesChainBranch(url, patterns)` — host+path match, lowercased, `www.` stripped, IDN → punycode via `domainToASCII`. Glob `*` expands to regex `.+`.
+- Matched rows are **removed** from stage-1 output; they never reach the DB.
+- `appendFilteredChainBranchLog(entry, csvPath)` → `logs/filtered_chain_branches.csv` (columns: `place_id,chain_name,url,matched_pattern,reason,filtered_at`).
+- Wiring: `src/pipeline/audit.ts` `processOne()` runs the check AFTER parking-detect (inside `auditOne`) and BEFORE the batch dedupe stage. Default config path `config/chain_branches.yml`; tests redirect via `logDir` option.
+
+**Stage 2 — `src/pipeline/chain-apex-dedupe.ts`** (batch, post-audit, pre-upsert)
+- `extractApex(url)` — eTLD+1 via `tldts.getDomain`; returns `null` for raw-IP and unparseable URLs (those pass through).
+- `dedupeChainApices(rows, {auditApex, logDir, now})` groups Tier-A survivors by apex. Groups with ≥2 rows trigger ONE synthetic apex audit (memoised per apex); singletons + pass-throughs are unchanged.
+- Decision at `BAD_APEX_SCORE_THRESHOLD = 5`:
+  - **Score < 5 (clean apex)** — drop all branches; each logged to `logs/filtered_chain_branches.csv` with `matched_pattern='<apex-dedupe>'` and `reason='good_apex_branch — parent site scored <N>'`.
+  - **Score ≥ 5 (bad apex) or null** — collapse the group into ONE canonical row using the apex audit body; overwrite `chain_detected=true, chain_name=<apex>, branch_count=N`. Each branch is archived to `logs/collapsed_branches.csv` (columns: `apex,chain_name,branch_place_id,branch_url,branch_score,collapsed_at`).
+- Failed apex audit (`null` return) → branches pass through untouched (log-and-continue).
+- Wiring: `src/pipeline/audit.ts` `runAudit()` collects per-row rows, calls `dedupeChainApices()`, then applies `--onlyTier` filter post-dedupe and batch-upserts survivors. Default apex auditor builds a synthetic `PlaceCandidate` with `placeId="apex:<apex>"` and runs the full `auditOne` path against `https://<apex>/`; tests inject via `auditApex` option.
+
+**Schema columns** (migration `0004_chain_apex_dedupe.sql`, SQLite only — PG deferred to Phase 5):
+- `chain_detected INTEGER NOT NULL DEFAULT 0` (boolean)
+- `chain_name TEXT` (nullable; the apex eTLD+1)
+- `branch_count INTEGER NOT NULL DEFAULT 1`
+
+**Export invariants** (`src/pipeline/export.ts` `assertExportInvariants`):
+- `branchCount` must be an integer ≥ 1.
+- `chain_detected=true` ⇒ `chain_name` non-null AND `branch_count ≥ 2`.
+- `chain_detected=false` ⇒ `chain_name=null` AND `branch_count=1`.
+
 ## CMS detection
 
 - **`src/pipeline/tech-stack.ts`** — `detectTechStack(bodyHtml, headers) → {signals: TechStackSignals}`. Scans the first 256 KB of HTML + response headers + set-cookies against `FINGERPRINTS`. Returns a `TechStackSignals` with six buckets; `cms` is the bucket the exporter surfaces.

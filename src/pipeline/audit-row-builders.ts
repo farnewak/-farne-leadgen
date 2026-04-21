@@ -109,6 +109,11 @@ export function buildEmptyTierRow(
     ),
     psiSignalsExpiresAt: null,
     score,
+    // FIX 6 defaults: row is not a collapsed chain until apex-dedupe
+    // actively re-writes these fields downstream.
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
   };
 }
 
@@ -161,6 +166,11 @@ export function assembleAuditRow(
       now.getTime() + env.AUDIT_PSI_TTL_DAYS * DAY_MS,
     ),
     score,
+    // FIX 6 defaults: Tier-A rows start life as non-collapsed; the apex
+    // dedupe stage overwrites these for collapsed canonical rows.
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
   };
 }
 

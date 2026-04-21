@@ -155,6 +155,16 @@ export const auditResults = sqliteTable(
       mode: "timestamp_ms",
     }),
     score: integer("score"),
+    // FIX 6: chain-apex dedupe columns. `chain_detected=true` marks a
+    // collapsed canonical row; `chain_name` carries the apex eTLD+1 and
+    // `branch_count` the number of original branch rows that merged in.
+    // Non-chain rows default to (false, NULL, 1). PG migration deferred
+    // to Phase 5 schema freeze.
+    chainDetected: integer("chain_detected", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    chainName: text("chain_name"),
+    branchCount: integer("branch_count").notNull().default(1),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

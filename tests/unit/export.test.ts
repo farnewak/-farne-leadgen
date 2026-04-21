@@ -49,6 +49,9 @@ function row(overrides: Partial<ExportRow> = {}): ExportRow {
     has_social: false,
     audited_at: new Date("2026-04-01T00:00:00.000Z"),
     score_breakdown: [],
+    chain_detected: false,
+    chain_name: null,
+    branch_count: 1,
     ...overrides,
   };
 }
@@ -100,6 +103,9 @@ function auditRow(overrides: Partial<AuditResult> = {}): AuditResult {
     staticSignalsExpiresAt: new Date("2026-05-10T12:00:00.000Z"),
     psiSignalsExpiresAt: null,
     score: 3,
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
     ...overrides,
   } as AuditResult;
 }
@@ -184,7 +190,7 @@ describe("toCsv — byte-level invariants", () => {
 
   it("columns are semicolon-separated", () => {
     const header = csv.replace("\uFEFF", "").split("\r\n")[0]!;
-    expect(header.split(";")).toHaveLength(20);
+    expect(header.split(";")).toHaveLength(23);
     expect(header.split(";")[0]).toBe("place_id");
   });
 

@@ -51,6 +51,12 @@ export interface UpsertAuditInput {
   staticSignalsExpiresAt: Date;
   psiSignalsExpiresAt: Date | null;
   score: number | null;
+  // FIX 6: chain-apex dedupe. Collapsed canonical rows carry
+  // chainDetected=true + chainName=<apex> + branchCount=N. Non-chain rows
+  // default to (false, null, 1) and must carry branchCount=1.
+  chainDetected: boolean;
+  chainName: string | null;
+  branchCount: number;
 }
 
 export interface AuditCacheEntry {
@@ -222,5 +228,8 @@ export async function markAuditError(
     staticSignalsExpiresAt: expires,
     psiSignalsExpiresAt: null,
     score: null,
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
   });
 }

@@ -77,6 +77,7 @@ function freshDb(): void {
     "0001_audit_results.sql",
     "0002_intent_tier.sql",
     "0003_lead_outcomes.sql",
+    "0004_chain_apex_dedupe.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../src/db/migrations/sqlite", f), "utf8"),
   );
@@ -93,9 +94,15 @@ function freshDb(): void {
 function loadFixtures(): PlaceCandidate[] {
   const raw = readFileSync(FIXTURE_PATH, "utf-8");
   const records = JSON.parse(raw) as FixtureRecord[];
+  // Regression lock covers only the original R1/R2/R3 baseline. R4*/R5
+  // are exercised by the chain-apex-dedupe integration test; processing
+  // them here would require mocking the apex auditor path.
+  const baseline = records.filter((r) =>
+    ["R1_broken_site", "R2_chain_branch", "R3_nameless_osm"].includes(r.id),
+  );
   // Cast away the null-name escape hatch: the pipeline accepts whatever the
   // discover hook returns, mirroring what OSM would hand over pre-filter.
-  return records.map(({ id: _id, ...rest }) => rest) as unknown as PlaceCandidate[];
+  return baseline.map(({ id: _id, ...rest }) => rest) as unknown as PlaceCandidate[];
 }
 
 function readAuditRows(): AuditResult[] {
@@ -174,6 +181,9 @@ function hydrateRow(row: Record<string, unknown>): AuditResult {
     staticSignalsExpiresAt: asDate(row.static_signals_expires_at) as Date,
     psiSignalsExpiresAt: asDate(row.psi_signals_expires_at),
     score: row.score as number | null,
+    chainDetected: asBool(row.chain_detected) ?? false,
+    chainName: (row.chain_name as string | null) ?? null,
+    branchCount: Number(row.branch_count ?? 1),
   };
 }
 
@@ -341,6 +351,9 @@ describe("stage1 regression lock", () => {
       {
         "address": "GmbHWipplingerstraße 14, 1010 Wien",
         "audited_at": 2026-04-20T12:00:00.000Z,
+        "branch_count": 1,
+        "chain_detected": false,
+        "chain_name": null,
         "cms": "",
         "coverage": "A",
         "email": null,
@@ -398,6 +411,9 @@ describe("stage1 regression lock", () => {
       {
         "address": "Landstraße 5, 1030 Wien",
         "audited_at": 2026-04-20T12:00:00.000Z,
+        "branch_count": 1,
+        "chain_detected": false,
+        "chain_name": null,
         "cms": "",
         "coverage": "A",
         "email": null,

@@ -176,6 +176,14 @@ export const auditResults = pgTable(
       mode: "date",
     }),
     score: integer("score"),
+    // FIX 6: chain-apex dedupe columns (see schema.sqlite.ts). PG
+    // migration deferred to Phase 5; the type declarations here keep
+    // `UpsertAuditInput` and drizzle select-types aligned across dialects
+    // even though live PG databases don't have the columns yet. Do NOT
+    // deploy against PG until the Phase 5 migration lands.
+    chainDetected: boolean("chain_detected").notNull().default(false),
+    chainName: text("chain_name"),
+    branchCount: integer("branch_count").notNull().default(1),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

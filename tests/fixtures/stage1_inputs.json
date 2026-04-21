@@ -40,5 +40,61 @@
     "phone": null,
     "lat": 48.2054,
     "lng": 16.3916
+  },
+  {
+    "id": "R4a_branch",
+    "placeId": "osm:node:100000004",
+    "name": "Kleingewerbe Wien Filiale Mitte",
+    "address": "Test 1, 1010 Wien",
+    "plz": "1010",
+    "district": "Innere Stadt",
+    "types": ["shop=general"],
+    "primaryType": "shop",
+    "website": "https://shop.kleingewerbe-wien.at/filiale-mitte",
+    "phone": null,
+    "lat": 48.2,
+    "lng": 16.37
+  },
+  {
+    "id": "R4b_branch",
+    "placeId": "osm:node:100000005",
+    "name": "Kleingewerbe Wien Filiale Ost",
+    "address": "Test 2, 1030 Wien",
+    "plz": "1030",
+    "district": "Landstraße",
+    "types": ["shop=general"],
+    "primaryType": "shop",
+    "website": "https://blog.kleingewerbe-wien.at/filiale-ost",
+    "phone": null,
+    "lat": 48.2,
+    "lng": 16.38
+  },
+  {
+    "id": "R4c_branch",
+    "placeId": "osm:node:100000006",
+    "name": "Kleingewerbe Wien Filiale Süd",
+    "address": "Test 3, 1050 Wien",
+    "plz": "1050",
+    "district": "Margareten",
+    "types": ["shop=general"],
+    "primaryType": "shop",
+    "website": "https://www.kleingewerbe-wien.at/filiale-sued",
+    "phone": null,
+    "lat": 48.18,
+    "lng": 16.35
+  },
+  {
+    "id": "R5_singleton",
+    "placeId": "osm:node:100000007",
+    "name": "Einzelkämpfer Consulting",
+    "address": "Singlestr. 1, 1070 Wien",
+    "plz": "1070",
+    "district": "Neubau",
+    "types": ["office=consulting"],
+    "primaryType": "office",
+    "website": "https://einzelkaempfer.at/",
+    "phone": null,
+    "lat": 48.2,
+    "lng": 16.34
   }
 ]

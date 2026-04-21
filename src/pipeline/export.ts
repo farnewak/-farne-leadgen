@@ -38,6 +38,14 @@ export interface ExportRow {
   has_social: boolean;
   audited_at: Date;
   score_breakdown: BreakdownEntry[];
+  // FIX 6 (chain-apex dedupe): collapsed canonical rows carry
+  // chain_detected=true plus chain_name=<apex> and branch_count=<N>.
+  // Non-collapsed rows default to (false, null, 1) and the invariant
+  // assertion keeps those two states disjoint — see
+  // assertExportInvariants.
+  chain_detected: boolean;
+  chain_name: string | null;
+  branch_count: number;
 }
 
 // Column order is the CSV header row and drives the iteration in toCsv().
@@ -64,6 +72,9 @@ export const EXPORT_COLUMNS: ReadonlyArray<keyof ExportRow> = [
   "has_social",
   "audited_at",
   "score_breakdown",
+  "chain_detected",
+  "chain_name",
+  "branch_count",
 ] as const;
 
 export interface ExportFilterOptions {
@@ -181,6 +192,9 @@ export function toJson(rows: ExportRow[]): string {
     has_social: r.has_social,
     audited_at: r.audited_at.toISOString().slice(0, 10),
     score_breakdown: r.score_breakdown,
+    chain_detected: r.chain_detected,
+    chain_name: r.chain_name,
+    branch_count: r.branch_count,
   }));
   return JSON.stringify(out, null, 2);
 }
@@ -305,6 +319,41 @@ function assertExportInvariants(row: AuditResult): void {
       );
     }
   }
+  // FIX 6 (chain-apex dedupe) invariants. Collapsed canonical rows
+  // (chain_detected=true) MUST carry a non-null chain_name (the apex
+  // eTLD+1) and branch_count >= 2 (a "collapse" with only 1 branch is a
+  // pipeline bug — it should have been a drop or pass-through). Non-
+  // collapsed rows (chain_detected=false) MUST carry chain_name=null
+  // and branch_count=1 so the two states stay disjoint in downstream
+  // filters.
+  if (!Number.isInteger(row.branchCount) || row.branchCount < 1) {
+    throw new Error(
+      `export invariant violated (row ${id}): branch_count must be an integer >= 1 (got ${row.branchCount})`,
+    );
+  }
+  if (row.chainDetected) {
+    if (row.chainName === null) {
+      throw new Error(
+        `export invariant violated (row ${id}): chain_detected=true but chain_name is null`,
+      );
+    }
+    if (row.branchCount < 2) {
+      throw new Error(
+        `export invariant violated (row ${id}): chain_detected=true but branch_count=${row.branchCount} (expected >= 2)`,
+      );
+    }
+  } else {
+    if (row.chainName !== null) {
+      throw new Error(
+        `export invariant violated (row ${id}): chain_detected=false but chain_name='${row.chainName}' (expected null)`,
+      );
+    }
+    if (row.branchCount !== 1) {
+      throw new Error(
+        `export invariant violated (row ${id}): chain_detected=false but branch_count=${row.branchCount} (expected 1)`,
+      );
+    }
+  }
 }
 
 export function rowToExportShape(
@@ -369,6 +418,9 @@ export function rowToExportShape(
     has_social: Object.keys(row.socialLinks).length > 0,
     audited_at: row.auditedAt,
     score_breakdown: breakdown,
+    chain_detected: row.chainDetected,
+    chain_name: row.chainName,
+    branch_count: row.branchCount,
   };
 }
 

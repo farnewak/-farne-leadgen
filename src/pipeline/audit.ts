@@ -19,6 +19,7 @@ import {
   appendFilteredChainBranchLog,
   type ChainBranchPattern,
 } from "./chain-filter.js";
+import { dedupeChainApices } from "./chain-apex-dedupe.js";
 import { resolve } from "node:path";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
@@ -82,6 +83,11 @@ export interface AuditRunOptions {
   // redirect it to a tmp dir so real `logs/` is never touched.
   chainBranchesConfig?: string;
   logDir?: string;
+  // FIX 6 test hook: injectable apex auditor. Production callers leave
+  // this undefined — the default path runs a real `auditOne` against a
+  // synthetic apex candidate. Tests pass a mock that returns a scored
+  // UpsertAuditInput without touching the network.
+  auditApex?: (apex: string) => Promise<UpsertAuditInput | null>;
 }
 
 // Default locations. `logs/` is created lazily on first filter-hit.
@@ -110,18 +116,87 @@ export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
   // early instead of silently dropping the filter.
   const chainPatterns = loadChainPatternsSafe(options);
 
+  // Collect per-row audit results (null = dropped by auditOne or chain-
+  // branch filter). The batch-stage apex dedupe runs AFTER all per-row
+  // work completes so it can see the full group of Tier-A rows that
+  // share an apex.
+  const collected: UpsertAuditInput[] = [];
   let done = 0;
   const tasks = candidates.map((c) =>
     schedule(hostOf(c), async () => {
-      await processOne(c, options, chainPatterns).catch((err) => {
+      try {
+        const row = await processOne(c, options, chainPatterns);
+        if (row !== null) collected.push(row);
+      } catch (err) {
         log.error(`audit failed for ${c.placeId}`, (err as Error).message);
-      });
+      }
       done += 1;
       if (done % 50 === 0) log.info(`progress: ${done}/${candidates.length}`);
     }),
   );
   await Promise.all(tasks);
+
+  // FIX 6: chain-apex dedupe. Batch operation over all Tier-A survivors
+  // that still have a discoveredUrl. Clean-apex groups drop their
+  // branches; bad-apex groups collapse to a single canonical row.
+  const logDir = options.logDir ?? DEFAULT_LOG_DIR;
+  const apexAuditor =
+    options.auditApex ?? ((apex: string) => defaultApexAudit(apex, options));
+  const dedupe = await dedupeChainApices(collected, {
+    auditApex: apexAuditor,
+    logDir,
+  });
+  log.info(
+    `apex dedupe: collapsed=${dedupe.collapsedGroups} branches dropped=${dedupe.droppedBranches} collapsed=${dedupe.collapsedBranches}`,
+  );
+
+  // Apply the --onlyTier flag at the final persist stage so dedupe sees
+  // the full Tier-A population (an --onlyTier=B run still wants chain
+  // filtering for the A rows it produces, not that it persists any).
+  const finalRows = options.onlyTier
+    ? dedupe.survivors.filter((r) => r.tier === options.onlyTier)
+    : dedupe.survivors;
+
+  for (const row of finalRows) {
+    try {
+      await upsertAudit(row);
+    } catch (err) {
+      log.warn(
+        `upsert failed for ${row.placeId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   log.info(`audit done: ${done}/${candidates.length}`);
+}
+
+// Default apex auditor: builds a synthetic PlaceCandidate for the apex
+// homepage and runs the full auditOne path against it. Reuses every
+// signal collector so the decision (drop vs collapse) is grounded in
+// the same scoring model we use for real rows.
+async function defaultApexAudit(
+  apex: string,
+  options: AuditRunOptions,
+): Promise<UpsertAuditInput | null> {
+  const syntheticCandidate: PlaceCandidate = {
+    placeId: `apex:${apex}`,
+    name: apex,
+    address: null,
+    plz: null,
+    district: null,
+    types: [],
+    primaryType: null,
+    website: `https://${apex}/`,
+    phone: null,
+    lat: 0,
+    lng: 0,
+  };
+  try {
+    return await auditOne(syntheticCandidate, options);
+  } catch (err) {
+    log.warn(`apex audit failed for ${apex}: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 function loadChainPatternsSafe(
@@ -151,28 +226,32 @@ function hostOf(c: PlaceCandidate): string {
   }
 }
 
+// processOne now returns the audit row instead of persisting it. The
+// caller (runAudit) batches all rows, runs chain-apex dedupe, and then
+// upserts the survivors. Returns null when the row was dropped (cache
+// hit, auditOne returned null, or chain-branch filter matched).
 async function processOne(
   candidate: PlaceCandidate,
   options: AuditRunOptions,
   chainPatterns: ChainBranchPattern[],
-): Promise<void> {
+): Promise<UpsertAuditInput | null> {
   if (!options.forceRefresh) {
     const cached = await checkAuditCache(candidate.placeId);
     if (cached.staticFresh && cached.psiFresh) {
       log.debug(`skip ${candidate.placeId} (cache hit)`);
-      return;
+      return null;
     }
   }
   try {
     const row = await auditOne(candidate, options);
     if (row === null) {
       // Dropped by enrichment (CLOSED_PERMANENTLY) — no DB row written.
-      return;
+      return null;
     }
     // FIX 5: chain-branch filter. Runs AFTER parking detection (which
-    // happens inside auditOne) and BEFORE chain-apex dedupe (Phase 2B
-    // FIX 6, not yet wired). Matched rows are logged and skipped here;
-    // they never land in audit_results.
+    // happens inside auditOne) and BEFORE chain-apex dedupe (FIX 6).
+    // Matched rows are logged and removed from the stage1 stream; they
+    // never reach the dedupe stage or audit_results.
     if (row.discoveredUrl && chainPatterns.length > 0) {
       const match = matchesChainBranch(row.discoveredUrl, chainPatterns);
       if (match) {
@@ -192,14 +271,14 @@ async function processOne(
         log.info(
           `chain-branch filter: drop ${row.placeId} (${match.chain_name}, ${match.matched_pattern})`,
         );
-        return;
+        return null;
       }
     }
-    if (options.onlyTier && row.tier !== options.onlyTier) return;
-    await upsertAudit(row);
+    return row;
   } catch (err) {
     log.warn(`auditOne threw for ${candidate.placeId}`, (err as Error).message);
     await markAuditError(candidate.placeId, "UNKNOWN", null);
+    return null;
   }
 }
 
