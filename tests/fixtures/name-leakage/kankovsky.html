@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Impressum — Café Ronacher</title></head>
+<body>
+<!--
+  Reconstructed fixture for the Phase 6 Bezirk-1010 bug observation
+  (osm:node:365865111, https://www.caferonacher.com/impressum).
+
+  Not fetched live — user declined the network call. The block below
+  is reconstructed to reproduce the exact stored `impressum_company_name`
+  after cheerio `$('body').text()` + `.replace(/\s+/g, ' ')` normalisation:
+
+    Ernst Kankovsky ​ Telefon: +43 (0) 1 - 512 72 79 ​ E-Mail: info@caferonacher.com ​ Website: www.cafe…
+
+  Zero-width-space chars (U+200B) are preserved intentionally. They are
+  the common Wix / Squarespace flow-block separator and do NOT match \s,
+  which is why they survive the whitespace-normalisation pass in
+  `extractCompanyName()` (src/pipeline/impressum-parsers.ts:89).
+-->
+<main>
+  <h1>Impressum</h1>
+  <section class="impressum-block">
+    <p>Medieninhaber: Ernst Kankovsky</p>
+    <p>​Telefon: +43 (0) 1 - 512 72 79</p>
+    <p>​E-Mail: info@caferonacher.com</p>
+    <p>​Website: www.caferonacher.com</p>
+    <p>Anschrift: Kärntner Straße 40, 1010 Wien</p>
+  </section>
+</main>
+</body>
+</html>

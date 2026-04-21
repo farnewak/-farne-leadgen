@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Impressum — Österreichische Apotheker-Verlagsgesellschaft</title></head>
+<body>
+<!--
+  Reconstructed fixture for the Phase 6 Bezirk-1010 bug observation
+  (osm:node:333302666, https://www.deineapotheke.at/impressum-kontakt).
+
+  Not fetched live — user declined the network call. The block below
+  is reconstructed to reproduce the exact stored `impressum_company_name`
+  after cheerio `$('body').text()` + `.replace(/\s+/g, ' ')` normalisation:
+
+    Österreichische Apotheker-Verlagsgesellschaft m.b.H.Unternehmensgegenstand:Herausgabe und Verschleiß
+
+  Note the missing space between "m.b.H." and "Unternehmensgegenstand:"
+  and between the colon and "Herausgabe" — these come from adjacent
+  inline elements without trailing whitespace, which cheerio's `.text()`
+  concatenates verbatim. The labelled-name regex
+  (LABELED_NAME_REGEX in src/pipeline/impressum-parsers.ts:84) triggers
+  on "Unternehmen:" (prefix of "Unternehmensgegenstand:") because the
+  regex uses `Unternehmen\s*:` and the `s*` tolerates zero whitespace.
+  The captured group then runs for up to 100 chars of post-normalised
+  body text, which in this DOM starts with the real company name and
+  overruns into the "Unternehmensgegenstand" clause.
+-->
+<main>
+  <h1>Impressum</h1>
+  <p><strong>Österreichische Apotheker-Verlagsgesellschaft m.b.H.</strong><span>Unternehmensgegenstand:</span><span>Herausgabe und Verschleiß</span> von Fachliteratur für das österreichische Apothekenwesen.</p>
+  <p>Spitalgasse 31a, 1090 Wien</p>
+  <p>UID: ATU12345678</p>
+</main>
+</body>
+</html>

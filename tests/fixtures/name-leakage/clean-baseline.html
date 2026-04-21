@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Impressum — Fladerei</title></head>
+<body>
+<!--
+  Reconstructed clean baseline fixture. Phase 6 Bezirk-1010
+  (osm:node:334634963, https://www.fladerei.com/impressum/) stored
+  `impressum_company_name = "Fladerei GmbH"` (13 chars). This case
+  demonstrates the HAPPY path: the COMPANY_NAME_REGEX legal-form
+  heuristic in src/pipeline/impressum-parsers.ts:80 fires on a short
+  clean block. Keep this fixture as a regression-negative: any future
+  fix MUST continue to return "Fladerei GmbH" exactly.
+-->
+<main>
+  <h1>Impressum</h1>
+  <p>Fladerei GmbH<br>Rotenturmstraße 1, 1010 Wien<br>UID: ATU87654321<br>Firmenbuchnummer: FN 123456a<br>Firmenbuchgericht: Handelsgericht Wien</p>
+  <p>E-Mail: kontakt@fladerei.com<br>Telefon: +43 1 234 5678</p>
+</main>
+</body>
+</html>
