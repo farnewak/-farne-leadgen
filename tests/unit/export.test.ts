@@ -37,7 +37,7 @@ function row(overrides: Partial<ExportRow> = {}): ExportRow {
     url: "https://example.at",
     phone: null,
     email: null,
-    email_is_generic: false,
+    email_is_generic: null,
     address: null,
     plz: null,
     uid: null,
@@ -257,22 +257,22 @@ describe("toJson — shape invariants", () => {
 });
 
 describe("rowToExportShape", () => {
-  it("email_is_generic=true when email appears in genericEmails", () => {
-    const db = auditRow({
-      impressumEmail: "info@example.at",
-      genericEmails: ["info@example.at", "office@example.at"],
-    });
+  it("email_is_generic=1 when email local-part is a generic role (info@)", () => {
+    const db = auditRow({ impressumEmail: "info@example.at" });
     const shape = rowToExportShape(db, { warn: () => {} });
-    expect(shape.email_is_generic).toBe(true);
+    expect(shape.email_is_generic).toBe(1);
   });
 
-  it("email_is_generic=false when email is specific", () => {
-    const db = auditRow({
-      impressumEmail: "max.mustermann@example.at",
-      genericEmails: ["info@example.at"],
-    });
+  it("email_is_generic=0 when email is a personal mailbox", () => {
+    const db = auditRow({ impressumEmail: "max.mustermann@example.at" });
     const shape = rowToExportShape(db, { warn: () => {} });
-    expect(shape.email_is_generic).toBe(false);
+    expect(shape.email_is_generic).toBe(0);
+  });
+
+  it("email_is_generic=null when no email was discovered", () => {
+    const db = auditRow({ impressumEmail: null });
+    const shape = rowToExportShape(db, { warn: () => {} });
+    expect(shape.email_is_generic).toBeNull();
   });
 
   it("name falls back from hostname when impressum_company_name is null", () => {

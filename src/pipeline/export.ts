@@ -6,6 +6,7 @@ import {
   type BreakdownEntry,
   type ScoreInput,
 } from "./score.js";
+import { classifyEmailGeneric } from "./email-classify.js";
 
 // Flat export-shape. Column order here is NOT authoritative — EXPORT_COLUMNS is.
 // JSON-serialisers may or may not preserve insertion order, which is why the
@@ -23,7 +24,10 @@ export interface ExportRow {
   url: string | null;
   phone: string | null;
   email: string | null;
-  email_is_generic: boolean;
+  // FIX 9 — three-valued: null if no email; 1 if local-part is a generic
+  // role mailbox (info@, office@, büro@, kanzlei@, …); 0 otherwise.
+  // CSV serialises 1/0 as "1"/"0"; null becomes "" (empty cell).
+  email_is_generic: 0 | 1 | null;
   address: string | null;
   plz: string | null;
   uid: string | null;
@@ -387,7 +391,20 @@ export function rowToExportShape(
 
   const name = row.impressumCompanyName ?? hostnameFallback(row.discoveredUrl);
   const email = row.impressumEmail;
-  const emailIsGeneric = email !== null && row.genericEmails.includes(email);
+  const emailIsGeneric = classifyEmailGeneric(email);
+  // FIX 9 invariants (tautological by construction — guard against drift).
+  if (emailIsGeneric !== null && email === null) {
+    throw new Error(
+      `export invariant violated (row ${row.placeId}): email_is_generic=${emailIsGeneric} requires a non-null email`,
+    );
+  }
+  if (emailIsGeneric === null && email !== null && email.includes("@")) {
+    // Email exists and has an @ — classification must be 0 or 1, never null.
+    // (A malformed email without @ is allowed to classify as null.)
+    throw new Error(
+      `export invariant violated (row ${row.placeId}): email='${email}' but email_is_generic=null`,
+    );
+  }
   const plz = extractPlzFromAddress(row.impressumAddress);
 
   const input = rebuildScoreInput(row);
