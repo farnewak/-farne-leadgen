@@ -1,6 +1,7 @@
 import type {
   Tier,
   IntentTier,
+  SubTier,
   TechStackSignals,
   SocialLinks,
 } from "../models/audit.js";
@@ -147,4 +148,21 @@ export function computeScore(input: ScoreInput): number {
   // Clamp: unbounded score would make sorting brittle when weights are tuned;
   // 0..30 keeps the CSV-export column comfortable and leaves room at the top.
   return Math.max(0, Math.min(30, sum));
+}
+
+// FIX 8 — sub_tier derivation. Must be called AFTER the score is finalised
+// (clamped). Pure function of (tier, score). Non-A tiers and null scores
+// collapse to null — see assertExportInvariants for the disjoint-states
+// guarantee. Thresholds align with outreach prioritisation:
+//   A1 (score >= 9)  — top-of-list, "Katastrophe"
+//   A2 (5..8)        — warm, "Ausbaufähig"
+//   A3 (<= 4)        — deprioritise, "Eh ok"
+export function computeSubTier(
+  tier: Tier,
+  score: number | null,
+): SubTier {
+  if (tier !== "A" || score === null) return null;
+  if (score >= 9) return "A1";
+  if (score >= 5) return "A2";
+  return "A3";
 }

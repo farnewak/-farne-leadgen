@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import {
   computeScore,
+  computeSubTier,
   scoreBreakdown,
   SCORING_WEIGHTS,
   NO_WEBSITE_PENALTY,
@@ -267,6 +268,43 @@ describe("NO_WEBSITE_PENALTY anchor", () => {
 
   it("SCORING_WEIGHTS.NO_WEBSITE mirrors NO_WEBSITE_PENALTY", () => {
     expect(SCORING_WEIGHTS.NO_WEBSITE).toBe(NO_WEBSITE_PENALTY);
+  });
+});
+
+// FIX 8 — sub_tier boundary classification.
+describe("computeSubTier — Tier-A boundaries", () => {
+  it("score=4 → A3 (eh ok)", () => {
+    expect(computeSubTier("A", 4)).toBe("A3");
+  });
+  it("score=5 → A2 (ausbaufähig, lower bound)", () => {
+    expect(computeSubTier("A", 5)).toBe("A2");
+  });
+  it("score=8 → A2 (ausbaufähig, upper bound)", () => {
+    expect(computeSubTier("A", 8)).toBe("A2");
+  });
+  it("score=9 → A1 (katastrophe, lower bound)", () => {
+    expect(computeSubTier("A", 9)).toBe("A1");
+  });
+  it("score=0 → A3", () => {
+    expect(computeSubTier("A", 0)).toBe("A3");
+  });
+  it("score=30 (clamp ceiling) → A1", () => {
+    expect(computeSubTier("A", 30)).toBe("A1");
+  });
+  it("tier=B1 → null regardless of score", () => {
+    expect(computeSubTier("B1", 7)).toBeNull();
+  });
+  it("tier=B2 → null", () => {
+    expect(computeSubTier("B2", 6)).toBeNull();
+  });
+  it("tier=B3 → null", () => {
+    expect(computeSubTier("B3", 20)).toBeNull();
+  });
+  it("tier=C → null", () => {
+    expect(computeSubTier("C", 12)).toBeNull();
+  });
+  it("tier=A with null score → null", () => {
+    expect(computeSubTier("A", null)).toBeNull();
   });
 });
 

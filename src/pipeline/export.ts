@@ -1,6 +1,7 @@
 import type { AuditResult } from "../db/schema.js";
-import type { Tier, IntentTier } from "../models/audit.js";
+import type { Tier, IntentTier, SubTier } from "../models/audit.js";
 import {
+  computeSubTier,
   scoreBreakdown,
   type BreakdownEntry,
   type ScoreInput,
@@ -46,6 +47,10 @@ export interface ExportRow {
   chain_detected: boolean;
   chain_name: string | null;
   branch_count: number;
+  // FIX 8 — sub-tier (A1/A2/A3) derived from score. Null for every
+  // non-A tier. Appended at the end of the column order on purpose so
+  // cell-index-based tests keep their offsets.
+  sub_tier: SubTier;
 }
 
 // Column order is the CSV header row and drives the iteration in toCsv().
@@ -75,6 +80,7 @@ export const EXPORT_COLUMNS: ReadonlyArray<keyof ExportRow> = [
   "chain_detected",
   "chain_name",
   "branch_count",
+  "sub_tier",
 ] as const;
 
 export interface ExportFilterOptions {
@@ -195,6 +201,7 @@ export function toJson(rows: ExportRow[]): string {
     chain_detected: r.chain_detected,
     chain_name: r.chain_name,
     branch_count: r.branch_count,
+    sub_tier: r.sub_tier,
   }));
   return JSON.stringify(out, null, 2);
 }
@@ -354,6 +361,22 @@ function assertExportInvariants(row: AuditResult): void {
       );
     }
   }
+  // FIX 8 — sub_tier invariants. Disjoint states:
+  //   sub_tier ∈ {A1,A2,A3} ⇒ tier === 'A'
+  //   sub_tier === null     ⇒ tier ∈ {B1,B2,B3,C}
+  // Since sub_tier is derived from (tier, score) via computeSubTier,
+  // these hold by construction — the check guards against future drift.
+  const sub = computeSubTier(row.tier, row.score);
+  if (sub !== null && row.tier !== "A") {
+    throw new Error(
+      `export invariant violated (row ${id}): sub_tier=${sub} requires tier='A' (got '${row.tier}')`,
+    );
+  }
+  if (sub === null && row.tier === "A" && row.score !== null) {
+    throw new Error(
+      `export invariant violated (row ${id}): tier='A' with score=${row.score} must have a sub_tier (got null)`,
+    );
+  }
 }
 
 export function rowToExportShape(
@@ -421,6 +444,7 @@ export function rowToExportShape(
     chain_detected: row.chainDetected,
     chain_name: row.chainName,
     branch_count: row.branchCount,
+    sub_tier: computeSubTier(row.tier, row.score),
   };
 }
 

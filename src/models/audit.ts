@@ -3,6 +3,15 @@ import { z } from "zod";
 export const TIERS = ["A", "B1", "B2", "B3", "C"] as const;
 export type Tier = (typeof TIERS)[number];
 
+// FIX 8 — orthogonal sub-classification of Tier-A rows by final score.
+// Derived at export time from (tier, score); not persisted on audit_results
+// (schema migration deferred to Phase 5). Null for every non-A tier.
+//   A1 "Katastrophe"   — score >= 9 (top-priority outreach)
+//   A2 "Ausbaufähig"   — 5 <= score <= 8 (warm leads)
+//   A3 "Eh ok"         — score <= 4 (deprioritise)
+export const SUB_TIERS = ["A1", "A2", "A3"] as const;
+export type SubTier = (typeof SUB_TIERS)[number] | null;
+
 // Intent-tier is orthogonal to the A/B1/B2/B3/C bucketing and captures the
 // domain-level signal rather than the site-quality signal:
 //   LIVE         = tier A with a real, non-parked site.

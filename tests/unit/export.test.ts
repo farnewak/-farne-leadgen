@@ -52,6 +52,7 @@ function row(overrides: Partial<ExportRow> = {}): ExportRow {
     chain_detected: false,
     chain_name: null,
     branch_count: 1,
+    sub_tier: null,
     ...overrides,
   };
 }
@@ -190,7 +191,7 @@ describe("toCsv — byte-level invariants", () => {
 
   it("columns are semicolon-separated", () => {
     const header = csv.replace("\uFEFF", "").split("\r\n")[0]!;
-    expect(header.split(";")).toHaveLength(23);
+    expect(header.split(";")).toHaveLength(24);
     expect(header.split(";")[0]).toBe("place_id");
   });
 
