@@ -7,11 +7,14 @@ CMS detection, and row serialization.
 
 Repo root: `/Users/arnerunger/web-agent/farne-leadgen`
 Language: TypeScript (strict, ESM), Node ≥22.12
-Exported columns (authoritative — `EXPORT_COLUMNS` in `src/pipeline/export.ts`):
-`place_id, tier, intent_tier, score, name, url, phone, email, email_is_generic,
-address, plz, uid, impressum_complete, coverage, psi_mobile_performance,
-ssl_valid, cms, has_social, audited_at, score_breakdown`
-(20 columns — the 18 the prompt mentions plus `intent_tier` and `coverage`.)
+Exported columns (authoritative — `STAGE1_COLUMNS` in
+`schemas/stage1_results.schema.ts`, re-exported as `EXPORT_COLUMNS` by
+`src/pipeline/export.ts`):
+`place_id, tier, sub_tier, intent_tier, chain_detected, chain_name,
+branch_count, score, name, url, phone, email, email_is_generic, address,
+plz, uid, impressum_complete, psi_mobile_performance, ssl_valid, cms,
+has_structured_data, last_modified_signal, has_social, audited_at,
+score_breakdown` (25 columns — see **Schema freeze** below).
 
 ---
 
@@ -223,9 +226,73 @@ ordination, rezeption, empfang, anfrage, office1).
     7. `email_is_generic ∈ {0,1}` ⇒ email non-null; `email_is_generic=null` ⇒ email null (or malformed without `@`)
   - `HAS_STRUCTURED_DATA` is now persisted on `audit_results.has_structured_data` (migration 0006) and read directly by `rebuildScoreInput()`. The previous export-time inference block (score-gap=+1 → synthetic entry) has been removed; any non-zero gap now emits an "(unexplained)" WARN. Legacy rows predating the migration expose `null` → coerced to `false`, so rows whose stored score included the `-1` bonus will show a gap of 1 and trigger the WARN — acceptable trade-off, documented in `tests/unit/export.test.ts` (T-Inf-1b).
 
+## Schema freeze
+
+The stage1-results export contract is locked in
+`schemas/stage1_results.schema.ts` as a Zod schema. Column order is frozen
+and driven off `Object.keys(Stage1ResultSchema.shape)` — the CSV header,
+JSON key emission, TypeScript row type, and the runtime `assertColumnOrder`
+check all read from this one source.
+
+The 25-column contract (positions 0..24):
+
+| # | column | type |
+|---|---|---|
+| 0 | `place_id` | string |
+| 1 | `tier` | `A\|B1\|B2\|B3\|C` |
+| 2 | `sub_tier` | `A1\|A2\|A3\|null` |
+| 3 | `intent_tier` | enum or `null` |
+| 4 | `chain_detected` | boolean |
+| 5 | `chain_name` | string or null |
+| 6 | `branch_count` | integer |
+| 7 | `score` | number or null |
+| 8 | `name` | string |
+| 9 | `url` | string or null |
+| 10 | `phone` | string or null |
+| 11 | `email` | string or null |
+| 12 | `email_is_generic` | `0\|1\|null` |
+| 13 | `address` | string or null |
+| 14 | `plz` | string or null |
+| 15 | `uid` | string or null |
+| 16 | `impressum_complete` | boolean or null |
+| 17 | `psi_mobile_performance` | number or null |
+| 18 | `ssl_valid` | boolean or null |
+| 19 | `cms` | string |
+| 20 | `has_structured_data` | boolean or null |
+| 21 | `last_modified_signal` | integer or null |
+| 22 | `has_social` | boolean |
+| 23 | `audited_at` | Date (ISO-date in CSV) |
+| 24 | `score_breakdown` | `{key, delta}[]` |
+
+Migrations that realise this schema on disk:
+
+- SQLite (authoritative): `0000_init`, `0001_audit_results`,
+  `0002_intent_tier`, `0003_lead_outcomes`, `0004_chain_apex_dedupe`,
+  `0005_last_modified_signal`, `0006_has_structured_data`.
+- PG (mirror): `0001_audit_results`, `0002_intent_tier`,
+  `0003_lead_outcomes`, `0004_intent_tier_dead_website`,
+  `0005_stage1_schema_freeze` (consolidates Phase-2B/3/4 columns with
+  `IF NOT EXISTS` guards + `CHECK` constraints for `sub_tier` and
+  `last_modified_signal`).
+
+**Rule:** any addition to this schema requires bumping a new migration in
+BOTH `pg/` and `sqlite/` AND updating this section in the same commit.
+`assertColumnOrder` (called from `rowToExportShape` inside
+`assertExportInvariants`) will throw with a precise key-delta diff if a
+row's key sequence drifts from `STAGE1_COLUMNS`.
+
 ## Results serialization
 
-- **`src/pipeline/export.ts`** — `ExportRow` interface, `EXPORT_COLUMNS` (ordered), `rowToExportShape(row)`, `filterRows()`, `sortRows()` (score DESC, audited_at DESC), `toCsv(rows)` (EU-Excel BOM + `;` separator + CRLF), `toJson(rows)` (ISO dates, structured breakdown), `buildCoverage(phone, email, address)`, `hostnameFallback(url)`, `extractPlzFromAddress(address)`.
+- **`schemas/stage1_results.schema.ts`** — `Stage1ResultSchema` (zod, 25
+  keys in frozen order), inferred `Stage1ResultRow`, `STAGE1_COLUMNS`
+  (readonly tuple derived from the schema shape), `assertColumnOrder(row,
+  rowId)`.
+- **`src/pipeline/export.ts`** — re-exports `ExportRow = Stage1ResultRow`
+  and `EXPORT_COLUMNS = STAGE1_COLUMNS`. Holds `rowToExportShape(row)`,
+  `filterRows()`, `sortRows()` (score DESC, audited_at DESC),
+  `toCsv(rows)` (EU-Excel BOM + `;` separator + CRLF — header emitted
+  directly from `STAGE1_COLUMNS`), `toJson(rows)` (ISO dates, schema-
+  ordered keys), `hostnameFallback(url)`, `extractPlzFromAddress(address)`.
 - **`src/cli/export.ts`** — `main()`. CLI for CSV/JSON dump; accepts `--bezirk`, `--plz`, `--tier`, `--min-score`, `--max-score`, `--limit`, `--format`, `--output`.
 - **`src/db/export-queries.ts`** — `loadAuditRows()`. Drizzle query that feeds rows into `rowToExportShape()`.
 
@@ -235,8 +302,8 @@ ordination, rezeption, empfang, anfrage, office1).
 - **`src/db/schema.sqlite.ts`** — `auditResults` table definition; `AuditResult` = `auditResults.$inferSelect`. `score_breakdown` is not a column; computed at export time.
 - **`src/db/schema.pg.ts`** — Postgres mirror of the SQLite schema.
 - **`src/db/schema.ts`** — Re-export façade; app code MUST import from here, not from the dialect-specific files.
-- **`src/db/migrations/sqlite/*.sql`** — `0000_init`, `0001_audit_results`, `0002_intent_tier`, `0003_lead_outcomes`. SQLite has no CHECK constraint on `intent_tier` (the SQLite driver never emitted one), so FIX 4's DEAD_WEBSITE value needs no SQLite migration.
-- **`src/db/migrations/pg/*.sql`** — PG mirror. `0004_intent_tier_dead_website` drops and recreates `audit_results_intent_tier_check` to include DEAD_WEBSITE (FIX 4).
+- **`src/db/migrations/sqlite/*.sql`** — `0000_init`, `0001_audit_results`, `0002_intent_tier`, `0003_lead_outcomes`, `0004_chain_apex_dedupe`, `0005_last_modified_signal`, `0006_has_structured_data`. SQLite has no CHECK constraint on `intent_tier` (the SQLite driver never emitted one), so FIX 4's DEAD_WEBSITE value needs no SQLite migration.
+- **`src/db/migrations/pg/*.sql`** — PG mirror. `0004_intent_tier_dead_website` drops and recreates `audit_results_intent_tier_check` to include DEAD_WEBSITE (FIX 4). `0005_stage1_schema_freeze` consolidates Phase-2B/3/4 columns (`chain_detected`, `chain_name`, `branch_count`, `sub_tier`, `last_modified_signal`, `has_structured_data`) with `IF NOT EXISTS` guards + CHECK constraints — paired with the `STAGE1_COLUMNS` freeze.
 
 ## Domain models
 

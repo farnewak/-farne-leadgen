@@ -7,91 +7,27 @@ import {
   type ScoreInput,
 } from "./score.js";
 import { classifyEmailGeneric } from "./email-classify.js";
+import {
+  STAGE1_COLUMNS,
+  assertColumnOrder,
+  type Stage1ResultRow,
+} from "../../schemas/stage1_results.schema.js";
 
-// Flat export-shape. Column order here is NOT authoritative — EXPORT_COLUMNS is.
-// JSON-serialisers may or may not preserve insertion order, which is why the
-// CSV path iterates EXPORT_COLUMNS explicitly instead of Object.keys(row).
-export interface ExportRow {
-  place_id: string;
-  tier: Tier;
-  intent_tier: IntentTier | null;
-  // Null is an EXPLICIT value — it marks audit-error rows (tier=C with no
-  // scorable signals). The serializer no longer falls back to a recomputed
-  // score when the stored value is null; callers that need a numeric value
-  // must either filter tier=C out or handle null themselves.
-  score: number | null;
-  name: string;
-  url: string | null;
-  phone: string | null;
-  email: string | null;
-  // FIX 9 — three-valued: null if no email; 1 if local-part is a generic
-  // role mailbox (info@, office@, büro@, kanzlei@, …); 0 otherwise.
-  // CSV serialises 1/0 as "1"/"0"; null becomes "" (empty cell).
-  email_is_generic: 0 | 1 | null;
-  address: string | null;
-  plz: string | null;
-  uid: string | null;
-  impressum_complete: boolean | null;
-  // Contact-coverage flag: union of channels present on the row.
-  // "" = no channel, "P" = phone only, "E" = email only, "A" = address only,
-  // "PEA" = all three. Drives outreach targeting (≥PEA rows are ready for
-  // cold mail + cold call + drop-in visit).
-  coverage: "" | "P" | "E" | "A" | "PE" | "PA" | "EA" | "PEA";
-  psi_mobile_performance: number | null;
-  ssl_valid: boolean | null;
-  cms: string;
-  has_social: boolean;
-  audited_at: Date;
-  score_breakdown: BreakdownEntry[];
-  // FIX 6 (chain-apex dedupe): collapsed canonical rows carry
-  // chain_detected=true plus chain_name=<apex> and branch_count=<N>.
-  // Non-collapsed rows default to (false, null, 1) and the invariant
-  // assertion keeps those two states disjoint — see
-  // assertExportInvariants.
-  chain_detected: boolean;
-  chain_name: string | null;
-  branch_count: number;
-  // FIX 8 — sub-tier (A1/A2/A3) derived from score. Null for every
-  // non-A tier. Appended at the end of the column order on purpose so
-  // cell-index-based tests keep their offsets.
-  sub_tier: SubTier;
-  // FIX 11 — site-freshness signal (year only). Null when no cascade step
-  // yielded a valid year (empty body, parsing failure, or out-of-range).
-  // Appended at the very end of the column order to preserve existing
-  // cell-index-based CSV tests.
-  last_modified_signal: number | null;
-}
+// FIX 13 — ExportRow is now a structural alias of Stage1ResultRow, the
+// frozen 25-column contract. Column order is owned by
+// schemas/stage1_results.schema.ts; this module is only responsible for
+// populating the values. Any attempt to add, remove or reorder keys
+// here must be accompanied by a matching schema change plus a bumped
+// DB migration (SQLite + PG) and an ARCHITECTURE_MAP.md update.
+export type ExportRow = Stage1ResultRow;
 
-// Column order is the CSV header row and drives the iteration in toCsv().
-// Keep this in sync with the ExportRow keys — a runtime check would catch
-// drift but a type-level check keeps it cheap.
-export const EXPORT_COLUMNS: ReadonlyArray<keyof ExportRow> = [
-  "place_id",
-  "tier",
-  "intent_tier",
-  "score",
-  "name",
-  "url",
-  "phone",
-  "email",
-  "email_is_generic",
-  "address",
-  "plz",
-  "uid",
-  "impressum_complete",
-  "coverage",
-  "psi_mobile_performance",
-  "ssl_valid",
-  "cms",
-  "has_social",
-  "audited_at",
-  "score_breakdown",
-  "chain_detected",
-  "chain_name",
-  "branch_count",
-  "sub_tier",
-  "last_modified_signal",
-] as const;
+// Re-export the frozen column order so existing imports keep working.
+// `EXPORT_COLUMNS` is the CSV header and drives serialization order.
+export const EXPORT_COLUMNS = STAGE1_COLUMNS;
+
+// Re-export a few types for external consumers (tests and CLIs that
+// build/assert on ExportRow directly).
+export type { Tier, IntentTier, SubTier, BreakdownEntry };
 
 export interface ExportFilterOptions {
   // `null` means "no filter" — different from an empty array, which would
@@ -177,43 +113,28 @@ function toCsvCell(val: unknown): string {
 }
 
 export function toCsv(rows: ExportRow[]): string {
-  const header = EXPORT_COLUMNS.map((c) => csvEscape(String(c))).join(SEP);
+  // Header is sourced from the frozen schema (STAGE1_COLUMNS) so CSV
+  // output and the TS contract can never drift.
+  const header = STAGE1_COLUMNS.map((c) => csvEscape(String(c))).join(SEP);
   const body = rows.map((r) =>
-    EXPORT_COLUMNS.map((c) => toCsvCell(r[c])).join(SEP),
+    STAGE1_COLUMNS.map((c) => toCsvCell(r[c])).join(SEP),
   );
   return BOM + [header, ...body].join(CRLF) + CRLF;
 }
 
 // JSON export: ISO dates, real booleans/nulls (not 1/0 or empty strings).
 // score_breakdown stays structured — consumers can diff deltas programmatically.
+// Key order mirrors STAGE1_COLUMNS via sequential assignment.
 export function toJson(rows: ExportRow[]): string {
-  const out = rows.map((r) => ({
-    place_id: r.place_id,
-    tier: r.tier,
-    intent_tier: r.intent_tier,
-    score: r.score,
-    name: r.name,
-    url: r.url,
-    phone: r.phone,
-    email: r.email,
-    email_is_generic: r.email_is_generic,
-    address: r.address,
-    plz: r.plz,
-    uid: r.uid,
-    impressum_complete: r.impressum_complete,
-    coverage: r.coverage,
-    psi_mobile_performance: r.psi_mobile_performance,
-    ssl_valid: r.ssl_valid,
-    cms: r.cms,
-    has_social: r.has_social,
-    audited_at: r.audited_at.toISOString().slice(0, 10),
-    score_breakdown: r.score_breakdown,
-    chain_detected: r.chain_detected,
-    chain_name: r.chain_name,
-    branch_count: r.branch_count,
-    sub_tier: r.sub_tier,
-    last_modified_signal: r.last_modified_signal,
-  }));
+  const out = rows.map((r) => {
+    const obj: Record<string, unknown> = {};
+    for (const key of STAGE1_COLUMNS) {
+      const value = r[key];
+      obj[key] =
+        value instanceof Date ? value.toISOString().slice(0, 10) : value;
+    }
+    return obj;
+  });
   return JSON.stringify(out, null, 2);
 }
 
@@ -440,10 +361,17 @@ export function rowToExportShape(
     else process.stderr.write(`${msg}\n`);
   }
 
-  return {
+  // Build the row in EXACTLY the frozen column order (FIX 13). The key
+  // sequence below must match STAGE1_COLUMNS 1:1; `assertColumnOrder`
+  // below throws if it doesn't.
+  const out: ExportRow = {
     place_id: row.placeId,
     tier: row.tier,
+    sub_tier: computeSubTier(row.tier, row.score),
     intent_tier: row.intentTier,
+    chain_detected: row.chainDetected,
+    chain_name: row.chainName,
+    branch_count: row.branchCount,
     // Serializer emits score AS STORED. Any upstream bug that left score
     // null must be visible here — the prior `?? recomputed` fallback hid
     // exactly that kind of defect (see Phase 1 regression R3).
@@ -457,32 +385,20 @@ export function rowToExportShape(
     plz,
     uid: row.impressumUid,
     impressum_complete: row.impressumComplete,
-    coverage: buildCoverage(row.impressumPhone, email, row.impressumAddress),
     psi_mobile_performance: row.psiMobilePerformance,
     ssl_valid: row.sslValid,
     cms: row.techStack.cms.join(","),
+    has_structured_data: row.hasStructuredData,
+    last_modified_signal: row.lastModifiedSignal,
     has_social: Object.keys(row.socialLinks).length > 0,
     audited_at: row.auditedAt,
     score_breakdown: breakdown,
-    chain_detected: row.chainDetected,
-    chain_name: row.chainName,
-    branch_count: row.branchCount,
-    sub_tier: computeSubTier(row.tier, row.score),
-    last_modified_signal: row.lastModifiedSignal,
   };
-}
 
-// Derives the Coverage flag from the three persisted contact channels.
-// Matches the enum defined on ExportRow. Order P → E → A is fixed so
-// "PE" / "PA" / "EA" / "PEA" string-compare to the same buckets across
-// different row generators.
-export function buildCoverage(
-  phone: string | null,
-  email: string | null,
-  address: string | null,
-): ExportRow["coverage"] {
-  const p = phone ? "P" : "";
-  const e = email ? "E" : "";
-  const a = address ? "A" : "";
-  return (p + e + a) as ExportRow["coverage"];
+  // FIX 13 — column-order integrity check. Keys MUST equal STAGE1_COLUMNS
+  // in sequence; violations throw with the exact index + key delta so
+  // schema drift surfaces at the earliest opportunity.
+  assertColumnOrder(out as unknown as Record<string, unknown>, row.placeId);
+
+  return out;
 }

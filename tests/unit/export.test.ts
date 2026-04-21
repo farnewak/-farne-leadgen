@@ -28,10 +28,17 @@ const EMPTY_TECH: TechStackSignals = {
 const EMPTY_SOCIAL: SocialLinks = {};
 
 function row(overrides: Partial<ExportRow> = {}): ExportRow {
+  // Key order below matches STAGE1_COLUMNS (FIX 13). The
+  // `assertColumnOrder` check inside `rowToExportShape` enforces this at
+  // runtime; tests that build rows by hand need the same discipline.
   return {
     place_id: "p1",
     tier: "A",
+    sub_tier: null,
     intent_tier: null,
+    chain_detected: false,
+    chain_name: null,
+    branch_count: 1,
     score: 10,
     name: "Test",
     url: "https://example.at",
@@ -42,18 +49,14 @@ function row(overrides: Partial<ExportRow> = {}): ExportRow {
     plz: null,
     uid: null,
     impressum_complete: null,
-    coverage: "",
     psi_mobile_performance: null,
     ssl_valid: null,
     cms: "",
+    has_structured_data: null,
+    last_modified_signal: null,
     has_social: false,
     audited_at: new Date("2026-04-01T00:00:00.000Z"),
     score_breakdown: [],
-    chain_detected: false,
-    chain_name: null,
-    branch_count: 1,
-    sub_tier: null,
-    last_modified_signal: null,
     ...overrides,
   };
 }
@@ -199,33 +202,34 @@ describe("toCsv — byte-level invariants", () => {
   });
 
   it("booleans become 1/0", () => {
-    // ssl_valid column (index 15 zero-based) is "1" for true.
+    // ssl_valid column (index 18 zero-based under STAGE1_COLUMNS) is "1".
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[15]).toBe("1");
+    expect(cells[18]).toBe("1");
   });
 
   it("epoch-ms dates become ISO date (yyyy-mm-dd)", () => {
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[18]).toBe("2026-04-10");
+    // audited_at is index 23 under STAGE1_COLUMNS.
+    expect(cells[23]).toBe("2026-04-10");
   });
 
   it("null fields become empty string", () => {
     const r2 = row({ email: null, phone: null });
     const line = toCsv([r2]).split("\r\n")[1]!;
     const cells = line.split(";");
-    // email is column index 7, phone index 6.
-    expect(cells[6]).toBe("");
-    expect(cells[7]).toBe("");
+    // phone is column index 10, email index 11.
+    expect(cells[10]).toBe("");
+    expect(cells[11]).toBe("");
   });
 
   it('embedded " is doubled and wrapped in quotes', () => {
     const r2 = row({ name: 'He said "hi"' });
     const line = toCsv([r2]).split("\r\n")[1]!;
-    // name is index 4. Whole cell wrapped in quotes; inner " doubled.
+    // name is index 8. Whole cell wrapped in quotes; inner " doubled.
     const cells = line.split(";");
-    expect(cells[4]).toBe('"He said ""hi"""');
+    expect(cells[8]).toBe('"He said ""hi"""');
   });
 
   it("semicolon inside a cell triggers quoting", () => {
