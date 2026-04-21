@@ -2,6 +2,8 @@
 // fetchAndParseImpressum() so each regex/heuristic is unit-testable against
 // raw fixtures.
 
+import { sanitizeCompanyName } from "./sanitize-company-name.js";
+
 // ATU = Austrian VAT-ID prefix, followed by exactly 8 digits. Matches
 // "ATU12345678", "ATU 12345678", "UID: ATU 1234 5678" — any whitespace
 // between the digits is collapsed before validation.
@@ -77,26 +79,64 @@ const LEGAL_FORMS = [
 // No trailing \b — some legal forms end in a period ("e.U.") so the usual
 // word-boundary check would fail. Leading anchor + lazy quantifier + the
 // whitespace-before-legal-form requirement together keep matches specific.
+// Phase 7b: cap the preamble at 60 chars (was 80) so navigation text like
+// "Menü Speisekarte … Firmenname GmbH" cannot stretch the greedy preamble
+// to swallow the nav block. 60 covers any realistic Austrian company name
+// including "Österreichische Apotheker-Verlagsgesellschaft" (47 chars).
 const COMPANY_NAME_REGEX = new RegExp(
-  `([A-ZÄÖÜ][\\wÄÖÜäöüß&.,'\\- ]{1,80}?\\s(?:${LEGAL_FORMS.join("|")}))`,
+  `([A-ZÄÖÜ][\\wÄÖÜäöüß&.,'\\- ]{1,60}?\\s(?:${LEGAL_FORMS.join("|")}))`,
 );
 
 const LABELED_NAME_REGEX =
   /(?:Firmenname|Firmenwortlaut|Unternehmen|Inhaber|Medieninhaber)\s*:\s*([^\n\r<]{2,100})/i;
 
+const MAX_NAME_LEN = 80;
+const MIN_NAME_LEN = 3;
+
+// Phase 7b Layer-A hardening: operate on raw `$('body').text()` (or whatever
+// string the caller hands us) WITHOUT pre-collapsing whitespace. The
+// cheerio body-text preserves block-boundary newlines; the LABELED regex's
+// `[^\n\r<]` stop then actually does its job instead of being neutralised
+// by `.replace(/\s+/g, " ")`. A final first-newline cut + 80-char cap +
+// min-length gate catches the remaining overflow cases that happen inside
+// a single flat paragraph (see Phase 7a discovery, Apotheker-Verlag).
 export function extractCompanyName(text: string): string | null {
   if (!text) return null;
-  const normalized = text.replace(/\s+/g, " ").trim();
 
-  const labeled = normalized.match(LABELED_NAME_REGEX);
+  const labeled = text.match(LABELED_NAME_REGEX);
   if (labeled?.[1]) {
-    const value = labeled[1].trim().replace(/[.,;]+$/, "");
-    if (value.length >= 2) return value;
+    const value = finalize(labeled[1]);
+    if (value) return value;
   }
 
-  const byForm = normalized.match(COMPANY_NAME_REGEX);
+  // Fallback to legal-form regex still requires some normalisation so that
+  // soft-wrapped names like "Fladerei\n  GmbH" can match. Scope the
+  // collapse to horizontal whitespace only, so structural paragraph
+  // breaks are preserved for the first-newline cut inside finalize().
+  const softCollapsed = text.replace(/[ \t]+/g, " ");
+  const byForm = softCollapsed.match(COMPANY_NAME_REGEX);
   if (byForm?.[1]) {
-    return byForm[1].trim();
+    const value = finalize(byForm[1]);
+    if (value) return value;
   }
   return null;
+}
+
+// Apply the Phase 7b per-match finalisation. Kept private so both regex
+// branches go through the same pipeline (first-newline cut, stop-keyword
+// sanitation, 80-char cap, trailing-punct strip, min-length gate).
+// Delegates to sanitizeCompanyName() so the extractor and the row-builder
+// share a single definition of "clean name" — layers remain independent
+// (row-builder still calls sanitizeCompanyName on legacy cached values)
+// but the semantics never drift between them.
+function finalize(raw: string): string | null {
+  const nlIdx = raw.search(/\r?\n/);
+  const headOnly = nlIdx > -1 ? raw.slice(0, nlIdx) : raw;
+  const trimmed = headOnly.trim();
+  if (trimmed.length < MIN_NAME_LEN) return null;
+  const sanitized = sanitizeCompanyName(trimmed);
+  if (sanitized === null) return null;
+  return sanitized.length > MAX_NAME_LEN
+    ? sanitized.slice(0, MAX_NAME_LEN).trim()
+    : sanitized;
 }

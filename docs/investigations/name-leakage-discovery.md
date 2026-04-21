@@ -364,3 +364,69 @@ the post-fix expected output:
   `tests/fixtures/name-leakage/*.html` are staged for review.
 - No Phase 7b implementation work. The fix option will be chosen and
   executed in the next explicit turn.
+
+---
+
+## Phase 7b outcome (2026-04-21)
+
+Implemented Option A + Option C:
+
+- `src/pipeline/impressum-parsers.ts`: `extractCompanyName` no longer
+  pre-collapses whitespace; both regex branches now delegate to a shared
+  `finalize()` helper that applies first-newline cut, trim, delegates to
+  the sanitizer, and enforces an 80-char cap. `COMPANY_NAME_REGEX`
+  preamble cap tightened from 80 → 60 chars so nav-block preambles
+  cannot stretch past any realistic Austrian company name.
+- `src/pipeline/sanitize-company-name.ts` (new): pure
+  `sanitizeCompanyName(raw)` implementing the 6-step spec (null-guard,
+  newline cut, stop-keyword cut, trim + trailing-separator strip,
+  80-char cap, min-length gate). 17-keyword stop list (case-insensitive).
+  Trailing-strip character class deliberately excludes `.` so legal
+  forms like `e.U.` / `m.b.H.` keep their terminal period.
+- `src/pipeline/audit-row-builders.ts:167`: `assembleAuditRow` wraps
+  `signals.impressum.companyName` in `sanitizeCompanyName(...)` as the
+  independent Layer-C guard.
+
+Regression coverage:
+
+- `tests/unit/sanitize-company-name.test.ts` (9 tests) — unit spec.
+- `tests/unit/impressum-parsers-name.test.ts` (3 tests) — fixture-based,
+  consuming `tests/fixtures/name-leakage/{clean-baseline,kankovsky,apotheker-verlag}.html`.
+- Full suite: 568/568 pass; `tsc --noEmit` clean.
+
+Retroactive DB repair via `scripts/apply-name-sanitizer.ts` (pure
+function equivalent of a post-fix re-audit for the
+`impressum_company_name` column):
+
+- Rows inspected: 51. Rows changed: 17 (11 length-overflow + 6 caught by
+  keyword stop).
+- Acceptance SQL — both return 0:
+  - `SELECT COUNT(*) FROM audit_results WHERE tier='A' AND LENGTH(impressum_company_name) > 80;` → **0**
+  - `SELECT COUNT(*) FROM audit_results WHERE impressum_company_name LIKE '%Telefon%' OR '%E-Mail%' OR '%UID%' OR '%Geschäftsführer%';` → **0**
+
+Representative repairs:
+
+| place_id | before (truncated) | after |
+| --- | --- | --- |
+| osm:node:333302666 | `Österreichische Apotheker-Verlagsgesellschaft m.b.H.Unternehmensgegenstand:Herausgabe und Verschleiß` | `Österreichische Apotheker-Verlagsgesellschaft m.b.H.` |
+| osm:node:312253426 | `Apotheke zu unserer lieben Frau bei den Schotten, Mag.pharm. Höbinger KG Adresse: Freyung 7, 1010 Wi…` | `Apotheke zu unserer lieben Frau bei den Schotten, Mag.pharm. Höbinger KG` |
+| osm:node:365865111 | `Ernst Kankovsky ​ Telefon: +43 (0) 1 - 512 72 79 ​ E-Mail: info@caferonacher.com …` | `Ernst Kankovsky ​` |
+| osm:node:411757173 | `Peter Czaak Postgasse 15, A-1010 Wien Tel.: +43 (1) 513 72 15 email: beim@czaak.com UID: ATU588 383` | `Peter Czaak Postgasse 15, A-1010 Wien Tel.: +43 (1) 513 72 15 email: beim@czaak.` |
+| osm:node:334641013 | `Perkins und Rosenberg Gesellschaft m.b.H (Pickwicks) Firmengericht: Handelsgericht Wien GLN: 9110015…` | `Perkins und Rosenberg Gesellschaft m.b.H (Pickwicks) Firmengericht` |
+
+### Known follow-up (out of Phase 7b scope)
+
+Several repaired `after` values reveal that the extractor locked onto
+nav/menu tokens as the preamble — rows 1, 3, 4, 8, 10, 11, 13, 16, 17
+in the full repair log. Examples:
+
+- `osm:node:269209053`: `DE Anmelden Anmelden Impressum Akakiko Restaurant-Entwicklungs GmbH` → `DE Anmelden Anmelden`
+- `osm:node:334634698`: `Menü Speisekarte Schmankerl Wochenmenü Galerie Kontakt Impressum Impressum Hamzo Gesellschaft m.b.H.` → `Menü`
+- `osm:node:418164970`: `Restaurant Speisekarte Reservieren Impressum Impressum Impressum Nigrum Montis GmbH` → `Restaurant`
+
+Phase 7b fixes the length/keyword bleed only. The nav-token preamble
+class (§3c in the root-cause catalogue) remains. A next-phase proposal:
+drop navigation-menu text before the extractor runs, either by operating
+on a subset of the DOM (e.g. excluding `<nav>`, `<header>`, `<footer>`,
+role=`banner`/`navigation`) or by a nav-token stop-list applied to the
+start of the preamble capture.

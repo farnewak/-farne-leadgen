@@ -14,6 +14,7 @@ import type { checkViewport } from "./viewport-check.js";
 import type { detectSchemaOrg } from "./schema-org.js";
 import type { runPsiMobile } from "./psi.js";
 import { computeScore } from "./score.js";
+import { sanitizeCompanyName } from "./sanitize-company-name.js";
 import { loadEnv } from "../lib/env.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -158,7 +159,12 @@ export function assembleAuditRow(
     impressumUrl: signals.impressum.url,
     impressumPresent: signals.impressum.present,
     impressumUid: signals.impressum.uid,
-    impressumCompanyName: signals.impressum.companyName,
+    // Phase 7b Layer-C defense: `extractCompanyName` can still produce a
+    // 100-char overflow when the match lives inside a single flat `<p>`
+    // with no newline boundaries (see docs/investigations/name-leakage-
+    // discovery.md §3e). The sanitizer trims at the first stop keyword,
+    // caps length at 80, and returns null if nothing meaningful remains.
+    impressumCompanyName: sanitizeCompanyName(signals.impressum.companyName),
     // Phase 6b wiring: when the impressum scraper returns no address, keep
     // the OSM candidate address so downstream (CSV PLZ filter, Bezirk
     // analytics) can still locate the business. `buildEmptyTierRow` already
