@@ -37,6 +37,10 @@ function freshDb(): void {
     "0000_init.sql",
     "0001_audit_results.sql",
     "0002_intent_tier.sql",
+    "0003_lead_outcomes.sql",
+    "0004_chain_apex_dedupe.sql",
+    "0005_last_modified_signal.sql",
+    "0006_has_structured_data.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../../src/db/migrations/sqlite", f), "utf8"),
   );
@@ -51,11 +55,13 @@ function freshDb(): void {
 }
 
 // Seeds N rows with deterministic field values. Score distribution:
-//   i=0 → score 20 / Tier A
-//   i=1..3 → score 15..13 / Tier B1
-//   i=4..6 → score 10 / Tier B2
-//   i=7..8 → score 9 / Tier B3
-//   i=9 → score 5 / Tier C
+//   i=0    → score 0  / Tier A  (all signals clean)
+//   i=1..3 → score 7  / Tier B1 (ONLY_SOCIAL)
+//   i=4..6 → score 6  / Tier B2 (ONLY_DIRECTORY)
+//   i=7..N → score 20 / Tier B3 (NO_WEBSITE post FIX 7)
+// All rows are FIX 3 invariant-compliant: a legitimate tier=C row must
+// have score=null + intent_tier∈{null,AUDIT_ERROR,TIMEOUT,PARKED}, so
+// the seed uses tier=B3 for the "no-site" bucket (matches FIX 4 behaviour).
 // Stored score matches what rebuildScoreInput would compute, so no
 // mismatch-warnings fire during export.
 function seedRows(count: number): void {
@@ -104,12 +110,9 @@ function seedRows(count: number): void {
     } else if (i <= 6) {
       tier = "B2";
       score = 6; // ONLY_DIRECTORY
-    } else if (i <= 8) {
-      tier = "B3";
-      score = 10; // NO_WEBSITE
     } else {
-      tier = "C";
-      score = 9; // DEAD_WEBSITE
+      tier = "B3";
+      score = 20; // NO_WEBSITE post FIX 7
     }
     insert.run(
       `p${i}`,
@@ -225,11 +228,12 @@ describe("leadgen export CLI (integration)", () => {
     expect((parsed as unknown[]).length).toBe(10);
   });
 
-  // T-Inf-4: seed a Tier-A row whose stored score is 1 less than what the
-  // rebuilt signals would recompute (simulating has_structured_data having
-  // fired at audit-time but not being persisted). Export must emit no WARN
-  // and the breakdown deltas must sum to the stored score.
-  it("T-Inf-4: structured-data gap=1 row → no stderr, breakdown sum == score", async () => {
+  // T-Inf-4 (#22): seed a Tier-A row whose stored score includes the
+  // HAS_STRUCTURED_DATA-1 bonus. With the column now persisted,
+  // rebuildScoreInput reads it directly and scoreBreakdown emits the entry
+  // naturally — no inference, no WARN, and the breakdown deltas sum to the
+  // stored score.
+  it("T-Inf-4: has_structured_data=1 row → no stderr, breakdown sum == score", async () => {
     const sql = new Database(TMP_DB);
     const tierATech = JSON.stringify({
       cms: [],
@@ -241,7 +245,7 @@ describe("leadgen export CLI (integration)", () => {
     });
     const tierASocial = JSON.stringify({ facebook: "https://facebook.com/x" });
     const now = new Date("2026-04-10T00:00:00.000Z").getTime();
-    // Signal mix: NO_SSL+3 = 3 pre-inference. stored=2 → gap=1.
+    // Signal mix: NO_SSL+3 + HAS_STRUCTURED_DATA-1 = 2. stored=2, no gap.
     sql
       .prepare(
         `INSERT INTO audit_results (
@@ -251,10 +255,10 @@ describe("leadgen export CLI (integration)", () => {
           impressum_present, impressum_uid, impressum_company_name,
           impressum_address, impressum_complete,
           tech_stack, generic_emails, social_links,
-          static_signals_expires_at, score
+          static_signals_expires_at, score, has_structured_data
         ) VALUES (?, ?, 'A', ?, 'osm-tag', 0, 1, 1, 80, 1, 'ATU12345678',
                   'Structured GmbH', 'Mariahilferstr 1, 1060 Wien', 1,
-                  ?, '[]', ?, ?, ?)`,
+                  ?, '[]', ?, ?, ?, 1)`,
       )
       .run(
         "structured-p",

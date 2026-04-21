@@ -12,7 +12,7 @@ import {
 // taking several seconds and blowing the 5s test timeout. Mocked to null
 // so the discovery path falls through to enrichment immediately.
 vi.mock("../../src/pipeline/dns-probe.js", () => ({
-  discoverViaDns: async () => null,
+  discoverViaDns: async () => ({ found: false, reason: "DNS_PROBE_DISABLED" }),
 }));
 import { readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -69,6 +69,10 @@ function freshDb(): void {
     "0000_init.sql",
     "0001_audit_results.sql",
     "0002_intent_tier.sql",
+    "0003_lead_outcomes.sql",
+    "0004_chain_apex_dedupe.sql",
+    "0005_last_modified_signal.sql",
+    "0006_has_structured_data.sql",
   ].map((f) =>
     readFileSync(resolve(HERE, "../../src/db/migrations/sqlite", f), "utf8"),
   );

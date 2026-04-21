@@ -54,6 +54,8 @@ const FEATURE_KEYS = [
   "genericEmails",
   "socialLinks",
   "intentTier",
+  "lastModifiedSignal",
+  "hasStructuredData",
 ] as const satisfies readonly (keyof AuditResult)[];
 
 export interface LabelExportLine {

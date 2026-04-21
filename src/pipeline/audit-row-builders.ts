@@ -34,6 +34,9 @@ export interface GatheredSignals {
   social: SocialLinks;
   schema: ReturnType<typeof detectSchemaOrg>;
   impressum: ImpressumData;
+  // FIX 11: last_modified year (or null if no signal). Populated by
+  // detectLastModifiedYear in audit.ts:gatherSignals.
+  lastModifiedSignal: number | null;
 }
 
 export function emptyTechStack(): TechStackSignals {
@@ -109,6 +112,18 @@ export function buildEmptyTierRow(
     ),
     psiSignalsExpiresAt: null,
     score,
+    // FIX 6 defaults: row is not a collapsed chain until apex-dedupe
+    // actively re-writes these fields downstream.
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
+    // FIX 11: empty-tier rows never run the last-modified detector
+    // (no home body to scan), so the signal is null by construction.
+    lastModifiedSignal: null,
+    // #22: empty-tier rows never run detectSchemaOrg. `false` matches the
+    // `hasStructuredData: false` passed into computeScore above, so the
+    // stored score stays reproducible from the row.
+    hasStructuredData: false,
   };
 }
 
@@ -144,7 +159,12 @@ export function assembleAuditRow(
     impressumPresent: signals.impressum.present,
     impressumUid: signals.impressum.uid,
     impressumCompanyName: signals.impressum.companyName,
-    impressumAddress: signals.impressum.address,
+    // Phase 6b wiring: when the impressum scraper returns no address, keep
+    // the OSM candidate address so downstream (CSV PLZ filter, Bezirk
+    // analytics) can still locate the business. `buildEmptyTierRow` already
+    // did the equivalent for B3 rows; Tier-A rows silently dropped the
+    // signal, which caused the 51→34 row loss in the Bezirk-1010 smoke.
+    impressumAddress: signals.impressum.address ?? candidate.address,
     impressumPhone: signals.impressum.phone,
     impressumEmail: signals.impressum.email,
     impressumComplete: signals.impressum.complete,
@@ -161,6 +181,17 @@ export function assembleAuditRow(
       now.getTime() + env.AUDIT_PSI_TTL_DAYS * DAY_MS,
     ),
     score,
+    // FIX 6 defaults: Tier-A rows start life as non-collapsed; the apex
+    // dedupe stage overwrites these for collapsed canonical rows.
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
+    // FIX 11: carry the detector's verdict straight through. Null when
+    // no cascade step produced a valid year.
+    lastModifiedSignal: signals.lastModifiedSignal,
+    // #22: persist the schema.org signal so the exporter no longer has
+    // to infer it from the score gap.
+    hasStructuredData: signals.schema.hasSchemaOrg,
   };
 }
 

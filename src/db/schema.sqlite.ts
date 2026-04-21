@@ -146,7 +146,7 @@ export const auditResults = sqliteTable(
     // Intent-tier is orthogonal to `tier` — see src/models/audit.ts. NULL
     // on historical rows until the next re-audit populates it.
     intentTier: text("intent_tier", {
-      enum: ["PARKED", "DEAD", "LIVE", "NONE"],
+      enum: ["PARKED", "DEAD", "DEAD_WEBSITE", "LIVE", "NONE"],
     }),
     staticSignalsExpiresAt: integer("static_signals_expires_at", {
       mode: "timestamp_ms",
@@ -155,6 +155,26 @@ export const auditResults = sqliteTable(
       mode: "timestamp_ms",
     }),
     score: integer("score"),
+    // FIX 6: chain-apex dedupe columns. `chain_detected=true` marks a
+    // collapsed canonical row; `chain_name` carries the apex eTLD+1 and
+    // `branch_count` the number of original branch rows that merged in.
+    // Non-chain rows default to (false, NULL, 1). PG migration deferred
+    // to Phase 5 schema freeze.
+    chainDetected: integer("chain_detected", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    chainName: text("chain_name"),
+    branchCount: integer("branch_count").notNull().default(1),
+    // FIX 11: site-freshness signal (year only, nullable). Populated by the
+    // cascaded copyright/Last-Modified/time-tag detector in Phase 4.
+    // Informational — no direct scoring impact in Phase 4; Phase 7 will use
+    // it to segment addressable markets by site freshness.
+    lastModifiedSignal: integer("last_modified_signal"),
+    // #22: persisted schema.org/JSON-LD signal. Replaces the export-time
+    // inference block in rowToExportShape — scores are now reproducible
+    // purely from the row. Nullable for legacy rows audited before this
+    // migration; `rebuildScoreInput` coerces null to `false`.
+    hasStructuredData: integer("has_structured_data", { mode: "boolean" }),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),

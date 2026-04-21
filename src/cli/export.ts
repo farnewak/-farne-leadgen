@@ -12,6 +12,11 @@ import {
 import { TIERS, type Tier } from "../models/audit.js";
 import { resolveBezirk } from "../tools/geo/bezirk.js";
 import {
+  effectivePlz,
+  parsePlzFallbackMode,
+  type PlzFallbackMode,
+} from "./plz-filter.js";
+import {
   getArg,
   getBoolArg,
   getNumberArg,
@@ -24,6 +29,7 @@ export interface ExportCliOptions {
   output: string;
   tiers: Tier[] | null;
   plzList: string[] | null;
+  plzFallback: PlzFallbackMode;
   minScore: number;
   maxScore: number;
   limit: number | null;
@@ -44,6 +50,12 @@ Options:
   --tier <T>             Filter by tier (repeatable). Allowed: ${TIERS.join(",")}.
                          Omit for all tiers.
   --plz 1010,1020        Comma-separated Vienna PLZs. Omit for all.
+  --plz-fallback <mode>  PLZ-filter coalesce mode. Allowed:
+                           strict      — impressum_address only (pre-6b behaviour)
+                           permissive  — impressum → osm_addr_postcode → regex
+                                         /\\b(1[0-2]\\d0)\\b/ on name + url
+                                         (DEFAULT; recovers Phase-6b drops)
+                           off         — no PLZ filter at all
   --min-score N          Minimum score (inclusive). Default: 0.
   --max-score N          Maximum score (inclusive). Default: 30.
   --limit N              Cap row count after sort. Default: no cap.
@@ -108,17 +120,64 @@ export function parseExportArgs(argv: string[]): ExportCliOptions {
   const maxScore = getNumberArg("--max-score", argv) ?? 30;
   const limit = getNumberArg("--limit", argv);
 
-  return { output, tiers, plzList, minScore, maxScore, limit, format };
+  // --plz-fallback defaults to "permissive" (the new Phase-6b behaviour).
+  // Throws on invalid values; main() catches and exits 1.
+  const plzFallback = parsePlzFallbackMode(getArg("--plz-fallback", argv));
+
+  return {
+    output,
+    tiers,
+    plzList,
+    plzFallback,
+    minScore,
+    maxScore,
+    limit,
+    format,
+  };
 }
 
 function toFilterOptions(opts: ExportCliOptions): ExportFilterOptions {
+  // PLZ filtering is now done by applyPlzFallback() before filterRows() runs,
+  // so the pipeline layer only handles tier/score/limit. Passing plzList=null
+  // prevents double-filtering and keeps the old strict-match logic confined
+  // to one place (behind `--plz-fallback=strict`).
   return {
     tiers: opts.tiers,
-    plzList: opts.plzList,
+    plzList: null,
     minScore: opts.minScore,
     maxScore: opts.maxScore,
     limit: opts.limit,
   };
+}
+
+// CLI-layer PLZ filter that honours `--plz-fallback`. Returns the rows kept;
+// `off` and empty plzList are pass-through. For strict/permissive each row's
+// effective PLZ is computed via coalesce (see plz-filter.ts) and matched
+// against the caller-supplied plzList (set by --plz or --bezirk).
+function applyPlzFallback(
+  rows: ExportRow[],
+  plzList: string[] | null,
+  mode: PlzFallbackMode,
+): ExportRow[] {
+  if (mode === "off" || plzList === null || plzList.length === 0) return rows;
+  return rows.filter((r) => {
+    const eff = effectivePlz(
+      {
+        impressumPlz: r.plz,
+        // ExportRow has no separate OSM-postcode column (schema is frozen
+        // at 25 cols — see FIX 13). `r.address` already carries the OSM
+        // address for B3 rows and — after the audit-layer fallback below —
+        // for Tier-A rows whose impressum scraper returned no address.
+        // `extractPlzFromAddress` is implicitly covered by impressumPlz
+        // (which was derived from r.address in rowToExportShape).
+        osmAddrPostcode: null,
+        name: r.name,
+        url: r.url,
+      },
+      mode,
+    );
+    return eff !== null && plzList.includes(eff);
+  });
 }
 
 export async function runExport(opts: ExportCliOptions): Promise<number> {
@@ -128,7 +187,8 @@ export async function runExport(opts: ExportCliOptions): Promise<number> {
     maxScore: opts.maxScore,
   });
   const shaped: ExportRow[] = dbRows.map((r) => rowToExportShape(r));
-  const filtered = filterRows(shaped, toFilterOptions(opts));
+  const afterPlz = applyPlzFallback(shaped, opts.plzList, opts.plzFallback);
+  const filtered = filterRows(afterPlz, toFilterOptions(opts));
 
   const absPath = resolve(process.cwd(), opts.output);
   mkdirSync(dirname(absPath), { recursive: true });

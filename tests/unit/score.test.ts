@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
+import fc from "fast-check";
 import {
   computeScore,
+  computeSubTier,
   scoreBreakdown,
   SCORING_WEIGHTS,
+  NO_WEBSITE_PENALTY,
   type ScoreInput,
 } from "../../src/pipeline/score.js";
 import type {
@@ -252,5 +255,143 @@ describe("scoreBreakdown — invariant with computeScore", () => {
       const clamped = Math.max(0, Math.min(30, sum));
       expect(clamped).toBe(computeScore(input));
     }
+  });
+});
+
+// FIX 7 — NO_WEBSITE_PENALTY anchor. Pinned at 20 so that the market-
+// weakness property (NO_WEBSITE outranks every realistic Tier-A record)
+// is enforced by a literal constant rather than a computed one.
+describe("NO_WEBSITE_PENALTY anchor", () => {
+  it("is exactly 20 (pin to detect accidental weight drift)", () => {
+    expect(NO_WEBSITE_PENALTY).toBe(20);
+  });
+
+  it("SCORING_WEIGHTS.NO_WEBSITE mirrors NO_WEBSITE_PENALTY", () => {
+    expect(SCORING_WEIGHTS.NO_WEBSITE).toBe(NO_WEBSITE_PENALTY);
+  });
+});
+
+// FIX 8 — sub_tier boundary classification.
+describe("computeSubTier — Tier-A boundaries", () => {
+  it("score=4 → A3 (eh ok)", () => {
+    expect(computeSubTier("A", 4)).toBe("A3");
+  });
+  it("score=5 → A2 (ausbaufähig, lower bound)", () => {
+    expect(computeSubTier("A", 5)).toBe("A2");
+  });
+  it("score=8 → A2 (ausbaufähig, upper bound)", () => {
+    expect(computeSubTier("A", 8)).toBe("A2");
+  });
+  it("score=9 → A1 (katastrophe, lower bound)", () => {
+    expect(computeSubTier("A", 9)).toBe("A1");
+  });
+  it("score=0 → A3", () => {
+    expect(computeSubTier("A", 0)).toBe("A3");
+  });
+  it("score=30 (clamp ceiling) → A1", () => {
+    expect(computeSubTier("A", 30)).toBe("A1");
+  });
+  it("tier=B1 → null regardless of score", () => {
+    expect(computeSubTier("B1", 7)).toBeNull();
+  });
+  it("tier=B2 → null", () => {
+    expect(computeSubTier("B2", 6)).toBeNull();
+  });
+  it("tier=B3 → null", () => {
+    expect(computeSubTier("B3", 20)).toBeNull();
+  });
+  it("tier=C → null", () => {
+    expect(computeSubTier("C", 12)).toBeNull();
+  });
+  it("tier=A with null score → null", () => {
+    expect(computeSubTier("A", null)).toBeNull();
+  });
+});
+
+// FIX 7 — property-based test. For every arbitrary combination of Tier-A
+// signal inputs, the final score must be strictly below NO_WEBSITE_PENALTY.
+// This is the business-invariant that makes the market-weakness ranking
+// stable: a lead with no site at all always outranks a lead with a weak
+// site, regardless of which specific penalties fire.
+describe("Tier-A score < NO_WEBSITE_PENALTY (property)", () => {
+  it("holds for 200 random Tier-A signal combinations", () => {
+    // FIX 10 — generator now includes the full cascaded-detector slug set
+    // so the property test also covers the new canonical values (nextjs,
+    // weebly, static_or_custom, etc.). weebly shares the budget-CMS penalty
+    // with wix/jimdo so the property holds even when it is picked.
+    const cmsPool = fc.constantFrom(
+      "wix",
+      "wordpress",
+      "jimdo",
+      "weebly",
+      "joomla",
+      "nextjs",
+      "nuxt",
+      "gatsby",
+      "static_or_custom",
+      "unknown",
+    );
+    const psiArb = fc.oneof(
+      fc.constant<number | null>(null),
+      fc.integer({ min: 0, max: 100 }),
+    );
+    fc.assert(
+      fc.property(
+        fc.boolean(), // sslValid
+        fc.boolean(), // httpToHttpsRedirect
+        fc.boolean(), // hasViewportMeta
+        psiArb, // psiMobilePerformance
+        fc.boolean(), // impressumPresent
+        fc.boolean(), // impressumComplete
+        fc.boolean(), // impressumUid present
+        fc.boolean(), // hasBudgetCms (wix/jimdo subset)
+        fc.array(cmsPool, { maxLength: 2 }), // extra cms entries (non-budget mostly)
+        fc.boolean(), // hasAnalytics
+        fc.boolean(), // hasTracking
+        fc.boolean(), // hasSocial
+        fc.boolean(), // hasStructuredData
+        (
+          ssl,
+          redirect,
+          viewport,
+          psi,
+          impPresent,
+          impComplete,
+          hasUid,
+          budgetCms,
+          extraCms,
+          analytics,
+          tracking,
+          social,
+          structured,
+        ) => {
+          const cms: string[] = [...extraCms];
+          if (budgetCms) cms.push("wix");
+          const input: ScoreInput = {
+            tier: "A",
+            sslValid: ssl,
+            httpToHttpsRedirect: redirect,
+            hasViewportMeta: viewport,
+            psiMobilePerformance: psi,
+            impressumPresent: impPresent,
+            impressumComplete: impComplete,
+            impressumUid: hasUid ? "ATU12345678" : null,
+            techStack: {
+              cms,
+              pageBuilder: [],
+              analytics: analytics ? ["ga"] : [],
+              tracking: tracking ? ["fb-pixel"] : [],
+              payment: [],
+              cdn: [],
+            },
+            socialLinks: social ? { facebook: "https://facebook.com/x" } : {},
+            hasStructuredData: structured,
+          };
+          const score = computeScore(input);
+          return score < NO_WEBSITE_PENALTY;
+        },
+      ),
+      { numRuns: 200 },
+    );
   });
 });

@@ -51,6 +51,17 @@ export interface UpsertAuditInput {
   staticSignalsExpiresAt: Date;
   psiSignalsExpiresAt: Date | null;
   score: number | null;
+  // FIX 6: chain-apex dedupe. Collapsed canonical rows carry
+  // chainDetected=true + chainName=<apex> + branchCount=N. Non-chain rows
+  // default to (false, null, 1) and must carry branchCount=1.
+  chainDetected: boolean;
+  chainName: string | null;
+  branchCount: number;
+  // FIX 11: last_modified year (1995..now+1) or null. Informational.
+  lastModifiedSignal: number | null;
+  // #22: persisted schema.org/JSON-LD signal. Null on legacy rows only;
+  // all post-#22 writes set either `true` or `false`.
+  hasStructuredData: boolean | null;
 }
 
 export interface AuditCacheEntry {
@@ -222,5 +233,10 @@ export async function markAuditError(
     staticSignalsExpiresAt: expires,
     psiSignalsExpiresAt: null,
     score: null,
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
+    lastModifiedSignal: null,
+    hasStructuredData: null,
   });
 }

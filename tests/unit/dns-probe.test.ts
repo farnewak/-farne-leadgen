@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   generateCandidates,
   validatesCandidate,
+  discoverViaDns,
 } from "../../src/pipeline/dns-probe.js";
 import type { PlaceCandidate } from "../../src/models/types.js";
 
@@ -82,5 +83,60 @@ describe("validatesCandidate", () => {
     const html = "<html><body>Gasthaus Muster GmbH</body></html>";
     const c = mkCandidate({ name: "Gasthaus zum Ochsen" });
     expect(validatesCandidate(html, c)).toBe(false);
+  });
+});
+
+describe("discoverViaDns — guardrails (FIX 2)", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns DNS_PROBE_DISABLED when env var is not set to 'true'", async () => {
+    // Default state: env unset → disabled. No DNS, no fetch, no throw.
+    const r = await discoverViaDns(mkCandidate({ name: "Müller GmbH" }));
+    expect(r).toEqual({ found: false, reason: "DNS_PROBE_DISABLED" });
+  });
+
+  it("returns DNS_PROBE_DISABLED when env var is 'false' or any non-'true' value", async () => {
+    for (const v of ["false", "0", "off", "", "yes"]) {
+      vi.stubEnv("DNS_PROBE_ENABLED", v);
+      const r = await discoverViaDns(mkCandidate({ name: "Müller GmbH" }));
+      expect(r).toEqual({ found: false, reason: "DNS_PROBE_DISABLED" });
+    }
+  });
+
+  it("returns NO_NAME when name is null, undefined, or whitespace", async () => {
+    vi.stubEnv("DNS_PROBE_ENABLED", "true");
+    // Cast to bypass strict name typing — the pipeline does pass null names
+    // through when OSM yields nameless records (see regression R3).
+    for (const name of [null, undefined, "", "   ", "\t\n"]) {
+      const c = { ...mkCandidate({}), name } as unknown as PlaceCandidate;
+      const r = await discoverViaDns(c);
+      expect(r).toEqual({ found: false, reason: "NO_NAME" });
+    }
+  });
+
+  it("returns BRANCH_NAME for 'Filiale' / 'Standort' / 'Zweigstelle' names", async () => {
+    vi.stubEnv("DNS_PROBE_ENABLED", "true");
+    for (const name of [
+      "Spar Filiale 1030",
+      "EUROSPAR Standort Landstraße",
+      "Bank Zweigstelle Mitte",
+      "FILIALE Wien",
+    ]) {
+      const r = await discoverViaDns(mkCandidate({ name }));
+      expect(r).toEqual({ found: false, reason: "BRANCH_NAME" });
+    }
+  });
+
+  it("branch-name guard is umlaut-folded and case-insensitive", async () => {
+    vi.stubEnv("DNS_PROBE_ENABLED", "true");
+    const r = await discoverViaDns(
+      mkCandidate({ name: "Filiale München-West" }),
+    );
+    expect(r).toEqual({ found: false, reason: "BRANCH_NAME" });
   });
 });

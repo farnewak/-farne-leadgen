@@ -1,0 +1,518 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
+import { readFileSync, mkdirSync, rmSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+import {
+  MockAgent,
+  setGlobalDispatcher,
+  getGlobalDispatcher,
+} from "undici";
+
+// Stub the network-dependent signal collectors so the snapshot is deterministic
+// regardless of whether CI can resolve DNS. `vi.mock` hoists above every import
+// in this file — keep these mocks narrow (one function each) so tests can still
+// observe every column the real builders would populate.
+vi.mock("../src/pipeline/ssl-check.js", () => ({
+  checkTransport: vi.fn(async (_host: string) => ({
+    sslValid: false,
+    sslExpiresAt: null,
+    httpToHttpsRedirect: false,
+    fetchError: "CERT_INVALID" as const,
+  })),
+}));
+
+vi.mock("../src/pipeline/psi.js", () => ({
+  runPsiMobile: vi.fn(async (_url: string) => ({
+    performance: null,
+    seo: null,
+    accessibility: null,
+    bestPractices: null,
+    fetchedAt: new Date("2026-04-20T12:00:00.000Z"),
+    error: "CLIENT_ERROR" as const,
+  })),
+}));
+
+import { runAudit } from "../src/pipeline/audit.js";
+import { rowToExportShape } from "../src/pipeline/export.js";
+import { resetEnvCache } from "../src/lib/env.js";
+import { __resetDbClientForTests } from "../src/db/client.js";
+import { resetRobotsCache } from "../src/pipeline/robots.js";
+import type { PlaceCandidate } from "../src/models/types.js";
+import type { AuditResult } from "../src/db/schema.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const TMP_DB = resolve(HERE, "tmp/stage1-regression.db");
+const TMP_LOG_DIR = resolve(HERE, "tmp/stage1-regression-logs");
+const FIXTURE_PATH = resolve(HERE, "fixtures/stage1_inputs.json");
+const FIXED_NOW = new Date("2026-04-20T12:00:00.000Z");
+
+interface FixtureRecord extends Omit<PlaceCandidate, "name"> {
+  id: string;
+  // Fixture allows null to mirror the raw "nameless OSM record" shape; the
+  // pipeline itself does not filter at this layer because discovery is
+  // bypassed via the `discover` hook.
+  name: string | null;
+}
+
+function freshDb(): void {
+  try {
+    rmSync(TMP_DB, { force: true });
+    rmSync(`${TMP_DB}-wal`, { force: true });
+    rmSync(`${TMP_DB}-shm`, { force: true });
+  } catch {
+    // tmp file may not exist yet
+  }
+  mkdirSync(dirname(TMP_DB), { recursive: true });
+  const sql = new Database(TMP_DB);
+  const migrations = [
+    "0000_init.sql",
+    "0001_audit_results.sql",
+    "0002_intent_tier.sql",
+    "0003_lead_outcomes.sql",
+    "0004_chain_apex_dedupe.sql",
+    "0005_last_modified_signal.sql",
+    "0006_has_structured_data.sql",
+  ].map((f) =>
+    readFileSync(resolve(HERE, "../src/db/migrations/sqlite", f), "utf8"),
+  );
+  for (const m of migrations) {
+    const parts = m.split("--> statement-breakpoint");
+    for (const p of parts) {
+      const trimmed = p.trim();
+      if (trimmed) sql.exec(trimmed);
+    }
+  }
+  sql.close();
+}
+
+function loadFixtures(): PlaceCandidate[] {
+  const raw = readFileSync(FIXTURE_PATH, "utf-8");
+  const records = JSON.parse(raw) as FixtureRecord[];
+  // Regression lock covers R1/R2/R3 baseline plus FIX 10/11 additions (R6).
+  // R4*/R5 are exercised by the chain-apex-dedupe integration test;
+  // processing them here would require mocking the apex auditor path.
+  const baseline = records.filter((r) =>
+    [
+      "R1_broken_site",
+      "R2_chain_branch",
+      "R3_nameless_osm",
+      "R6_wordpress_dated",
+    ].includes(r.id),
+  );
+  // Cast away the null-name escape hatch: the pipeline accepts whatever the
+  // discover hook returns, mirroring what OSM would hand over pre-filter.
+  return baseline.map(({ id: _id, ...rest }) => rest) as unknown as PlaceCandidate[];
+}
+
+function readAuditRows(): AuditResult[] {
+  const sql = new Database(TMP_DB, { readonly: true });
+  try {
+    const rows = sql
+      .prepare(
+        "SELECT * FROM audit_results ORDER BY place_id",
+      )
+      .all() as Array<Record<string, unknown>>;
+    return rows.map(hydrateRow);
+  } finally {
+    sql.close();
+  }
+}
+
+// Drizzle's select() deserialises JSON / timestamp columns automatically; the
+// raw better-sqlite3 read does not. Re-hydrate the minimal subset of columns
+// the exporter reads so the snapshot matches what the production export path
+// would produce.
+function hydrateRow(row: Record<string, unknown>): AuditResult {
+  const parseJson = <T>(v: unknown, fallback: T): T => {
+    if (typeof v !== "string") return fallback;
+    try {
+      return JSON.parse(v) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  const asDate = (v: unknown): Date | null => {
+    if (v == null) return null;
+    return new Date(Number(v));
+  };
+  const asBool = (v: unknown): boolean | null => {
+    if (v == null) return null;
+    return Number(v) === 1;
+  };
+  return {
+    id: Number(row.id),
+    placeId: String(row.place_id),
+    auditedAt: asDate(row.audited_at) as Date,
+    tier: row.tier as AuditResult["tier"],
+    discoveredUrl: (row.discovered_url as string | null) ?? null,
+    discoveryMethod: row.discovery_method as AuditResult["discoveryMethod"],
+    sslValid: asBool(row.ssl_valid),
+    sslExpiresAt: asDate(row.ssl_expires_at),
+    httpToHttpsRedirect: asBool(row.http_to_https_redirect),
+    hasViewportMeta: asBool(row.has_viewport_meta),
+    viewportMetaContent: (row.viewport_meta_content as string | null) ?? null,
+    psiMobilePerformance: row.psi_mobile_performance as number | null,
+    psiMobileSeo: row.psi_mobile_seo as number | null,
+    psiMobileAccessibility: row.psi_mobile_accessibility as number | null,
+    psiMobileBestPractices: row.psi_mobile_best_practices as number | null,
+    psiFetchedAt: asDate(row.psi_fetched_at),
+    impressumUrl: (row.impressum_url as string | null) ?? null,
+    impressumPresent: Number(row.impressum_present) === 1,
+    impressumUid: (row.impressum_uid as string | null) ?? null,
+    impressumCompanyName: (row.impressum_company_name as string | null) ?? null,
+    impressumAddress: (row.impressum_address as string | null) ?? null,
+    impressumPhone: (row.impressum_phone as string | null) ?? null,
+    impressumEmail: (row.impressum_email as string | null) ?? null,
+    impressumComplete: asBool(row.impressum_complete),
+    techStack: parseJson(row.tech_stack, {
+      cms: [],
+      pageBuilder: [],
+      analytics: [],
+      tracking: [],
+      payment: [],
+      cdn: [],
+    }),
+    genericEmails: parseJson(row.generic_emails, [] as string[]),
+    socialLinks: parseJson(row.social_links, {}),
+    fetchError: row.fetch_error as AuditResult["fetchError"],
+    fetchErrorAt: asDate(row.fetch_error_at),
+    intentTier: row.intent_tier as AuditResult["intentTier"],
+    staticSignalsExpiresAt: asDate(row.static_signals_expires_at) as Date,
+    psiSignalsExpiresAt: asDate(row.psi_signals_expires_at),
+    score: row.score as number | null,
+    chainDetected: asBool(row.chain_detected) ?? false,
+    chainName: (row.chain_name as string | null) ?? null,
+    branchCount: Number(row.branch_count ?? 1),
+    lastModifiedSignal:
+      row.last_modified_signal == null
+        ? null
+        : Number(row.last_modified_signal),
+    hasStructuredData: asBool(row.has_structured_data),
+  };
+}
+
+describe("stage1 regression lock", () => {
+  let agent: MockAgent;
+  const originalDispatcher = getGlobalDispatcher();
+
+  beforeEach(() => {
+    // Fake only Date — setTimeout / setImmediate stay real so fetch-timeouts
+    // and the host-limiter's deferred callbacks still resolve naturally.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(FIXED_NOW);
+
+    vi.unstubAllEnvs();
+    vi.stubEnv("DATABASE_URL", `file:${TMP_DB}`);
+    vi.stubEnv("AUDIT_FETCH_RETRIES", "0");
+    vi.stubEnv("AUDIT_FETCH_TIMEOUT_MS", "2000");
+    vi.stubEnv("AUDIT_RESPECT_ROBOTS_TXT", "false");
+    vi.stubEnv("AUDIT_CONCURRENCY", "5");
+    vi.stubEnv("AUDIT_MIN_DELAY_PER_HOST_MS", "0");
+    vi.stubEnv("DNS_PROBE_ENABLED", "false");
+    vi.stubEnv("CSE_DISCOVERY_ENABLED", "false");
+    vi.stubEnv("B3_ENRICHMENT_ENABLED", "false");
+    vi.stubEnv("IMPRESSUM_SCRAPER_ENABLED", "false");
+    vi.stubEnv("AUDIT_STATIC_TTL_DAYS", "30");
+    vi.stubEnv("AUDIT_PSI_TTL_DAYS", "14");
+    resetEnvCache();
+    __resetDbClientForTests();
+    resetRobotsCache();
+    freshDb();
+
+    // FIX 5: redirect the chain-branch filter log to a tmp dir so the real
+    // repo-level `logs/` is never touched during tests. Cleaned below.
+    try {
+      rmSync(TMP_LOG_DIR, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+
+    agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+
+    // R1: plain home page with a partial Impressum. UID is missing on purpose
+    // (`complete=false` scenario). No viewport meta, no structured data,
+    // no analytics — signals that feed NO_MOBILE_VIEWPORT / NO_ANALYTICS.
+    agent
+      .get("https://www.kleinmeister-cafe.at")
+      .intercept({ path: "/", method: "GET" })
+      .reply(
+        200,
+        "<!doctype html><html><head><title>Kleinmeister</title></head>" +
+          "<body><h1>Kleinmeister Café</h1>" +
+          '<p>Wipplingerstraße 14, 1010 Wien, Telefon +43 1 555 1010.</p>' +
+          "</body></html>",
+      )
+      .persist();
+    for (const p of [
+      "/impressum",
+      "/imprint",
+      "/legal",
+      "/kontakt",
+      "/about",
+      "/ueber-uns",
+    ]) {
+      agent
+        .get("https://www.kleinmeister-cafe.at")
+        .intercept({ path: p, method: "GET" })
+        .reply(
+          p === "/impressum" ? 200 : 404,
+          p === "/impressum"
+            ? "<!doctype html><html><body>" +
+                "<h1>Impressum</h1>" +
+                "<p>Kleinmeister Café GmbH</p>" +
+                "<p>Wipplingerstraße 14, 1010 Wien</p>" +
+                "</body></html>"
+            : "",
+        )
+        .persist();
+    }
+
+    // R2: Spar branch page. Single 200 — every Impressum path 404s.
+    agent
+      .get("https://www.spar.at")
+      .intercept({
+        path: "/standorte/eurospar-wien-1030-landstrasser-hauptstrasse-146",
+        method: "GET",
+      })
+      .reply(
+        200,
+        "<!doctype html><html><head><title>EUROSPAR Landstraßer Hauptstr. 146</title></head>" +
+          "<body><h1>EUROSPAR</h1><p>Landstraßer Hauptstraße 146, 1030 Wien</p></body></html>",
+      )
+      .persist();
+    for (const p of [
+      "/impressum",
+      "/imprint",
+      "/legal",
+      "/kontakt",
+      "/about",
+      "/ueber-uns",
+    ]) {
+      agent
+        .get("https://www.spar.at")
+        .intercept({ path: p, method: "GET" })
+        .reply(404, "")
+        .persist();
+    }
+
+    // R6: Tier-A WordPress site with a 2020 copyright footer. Exercises
+    // FIX 10 (Step A meta-generator → wordpress, Step B asset path also
+    // matches so the detector's cascade short-circuits at Step A) and
+    // FIX 11 (copyright regex picks up 2020 as last_modified_signal).
+    agent
+      .get("https://wp-ladenbau.at")
+      .intercept({ path: "/", method: "GET" })
+      .reply(
+        200,
+        "<!doctype html><html><head>" +
+          '<meta name="generator" content="WordPress 6.3.1">' +
+          "<title>WP Ladenbau Wien</title></head>" +
+          '<body><link rel="stylesheet" href="/wp-content/themes/foo/style.css">' +
+          "<h1>Ladenbau Wien</h1>" +
+          '<footer>© 2020 WP Ladenbau Wien. Alle Rechte vorbehalten.</footer>' +
+          "</body></html>",
+      )
+      .persist();
+    for (const p of [
+      "/impressum",
+      "/imprint",
+      "/legal",
+      "/kontakt",
+      "/about",
+      "/ueber-uns",
+    ]) {
+      agent
+        .get("https://wp-ladenbau.at")
+        .intercept({ path: p, method: "GET" })
+        .reply(
+          p === "/impressum" ? 200 : 404,
+          p === "/impressum"
+            ? "<!doctype html><html><body>" +
+                "<h1>Impressum</h1>" +
+                "<p>WP Ladenbau Wien e.U.</p>" +
+                "<p>Handwerksweg 5, 1060 Wien</p>" +
+                "</body></html>"
+            : "",
+        )
+        .persist();
+    }
+  });
+
+  afterEach(async () => {
+    await agent.close();
+    setGlobalDispatcher(originalDispatcher);
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+    resetEnvCache();
+    __resetDbClientForTests();
+    try {
+      rmSync(TMP_LOG_DIR, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
+
+  it("locks the full export row for R1/R3/R6 as-is (R2 filtered by FIX 5)", async () => {
+    const fixtures = loadFixtures();
+
+    await runAudit({
+      limit: 10,
+      discover: async () => fixtures,
+      logDir: TMP_LOG_DIR,
+    });
+
+    const rows = readAuditRows();
+    // FIX 5: R2 (EUROSPAR Landstraßer Hauptstraße) matches the
+    // `spar.at/standorte/*` chain-branch pattern and is removed from the
+    // stage1 output stream. R1 + R3 + R6 remain in the DB.
+    expect(rows).toHaveLength(3);
+
+    const byId = Object.fromEntries(rows.map((r) => [r.placeId, r]));
+
+    expect(byId["osm:node:100000002"]).toBeUndefined();
+
+    const r1 = rowToExportShape(byId["osm:node:100000001"]!);
+    const r3 = rowToExportShape(byId["osm:node:100000003"]!);
+    const r6 = rowToExportShape(byId["osm:node:100000008"]!);
+
+    // FIX 5: verify R2 was logged to the filtered-chain-branches CSV.
+    const csvPath = resolve(TMP_LOG_DIR, "filtered_chain_branches.csv");
+    const csv = readFileSync(csvPath, "utf-8");
+    const lines = csv.trim().split("\n");
+    expect(lines[0]).toBe(
+      "place_id,chain_name,url,matched_pattern,reason,filtered_at",
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("osm:node:100000002");
+    expect(lines[1]).toContain("Spar");
+    expect(lines[1]).toContain("spar.at/standorte/*");
+    expect(lines[1]).toContain(
+      "https://www.spar.at/standorte/eurospar-wien-1030-landstrasser-hauptstrasse-146",
+    );
+
+    // Snapshot the full ExportRow shape for each fixture. No hand-written
+    // assertions on specific columns — this is a regression lock, not a spec.
+    expect(r1).toMatchInlineSnapshot(`
+      {
+        "address": "GmbHWipplingerstraße 14, 1010 Wien",
+        "audited_at": 2026-04-20T12:00:00.000Z,
+        "branch_count": 1,
+        "chain_detected": false,
+        "chain_name": null,
+        "cms": "static_or_custom",
+        "email": null,
+        "email_is_generic": null,
+        "has_social": false,
+        "has_structured_data": false,
+        "impressum_complete": false,
+        "intent_tier": "LIVE",
+        "last_modified_signal": null,
+        "name": "Kleinmeister-Cafe",
+        "phone": null,
+        "place_id": "osm:node:100000001",
+        "plz": "1010",
+        "psi_mobile_performance": null,
+        "score": 14,
+        "score_breakdown": [
+          {
+            "delta": 3,
+            "key": "NO_SSL",
+          },
+          {
+            "delta": 2,
+            "key": "NO_HTTPS_REDIRECT",
+          },
+          {
+            "delta": 3,
+            "key": "NO_MOBILE_VIEWPORT",
+          },
+          {
+            "delta": 2,
+            "key": "IMPRESSUM_INCOMPLETE",
+          },
+          {
+            "delta": 1,
+            "key": "NO_UID",
+          },
+          {
+            "delta": 1,
+            "key": "NO_ANALYTICS",
+          },
+          {
+            "delta": 1,
+            "key": "NO_MODERN_TRACKING",
+          },
+          {
+            "delta": 1,
+            "key": "NO_SOCIAL_LINKS",
+          },
+        ],
+        "ssl_valid": false,
+        "sub_tier": "A1",
+        "tier": "A",
+        "uid": null,
+        "url": "https://www.kleinmeister-cafe.at",
+      }
+    `);
+    expect(r3).toMatchInlineSnapshot(`
+      {
+        "address": "Landstraße 5, 1030 Wien",
+        "audited_at": 2026-04-20T12:00:00.000Z,
+        "branch_count": 1,
+        "chain_detected": false,
+        "chain_name": null,
+        "cms": "",
+        "email": null,
+        "email_is_generic": null,
+        "has_social": false,
+        "has_structured_data": false,
+        "impressum_complete": null,
+        "intent_tier": "DEAD_WEBSITE",
+        "last_modified_signal": null,
+        "name": "",
+        "phone": null,
+        "place_id": "osm:node:100000003",
+        "plz": "1030",
+        "psi_mobile_performance": null,
+        "score": 20,
+        "score_breakdown": [
+          {
+            "delta": 20,
+            "key": "NO_WEBSITE",
+          },
+        ],
+        "ssl_valid": null,
+        "sub_tier": null,
+        "tier": "B3",
+        "uid": null,
+        "url": null,
+      }
+    `);
+    // R6 — Tier-A WordPress site. FIX 10 exercises the meta-generator
+    // step (wins over the /wp-content/ asset path because it short-
+    // circuits after Step A reuse of existing fingerprints which happens
+    // to already match WordPress from MIN_MATCHES=2). Signals mirror R1
+    // (no SSL, no viewport, partial impressum, no analytics/tracking/
+    // social) so the breakdown lands at 14.
+    expect(r6.tier).toBe("A");
+    expect(r6.cms).toBe("wordpress");
+    expect(r6.sub_tier).toBe("A1");
+    expect(r6.score).toBe(14);
+    // FIX 11: "© 2020 …" in the footer is picked up by the copyright
+    // regex step of the last-modified cascade. R1/R3 have no freshness
+    // signal (body has no copyright / tier-B3 path skips detector).
+    expect(r6.last_modified_signal).toBe(2020);
+    expect(r1.last_modified_signal).toBe(null);
+    expect(r3.last_modified_signal).toBe(null);
+  });
+});

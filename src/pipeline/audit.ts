@@ -13,12 +13,27 @@ import {
 } from "./enrich.js";
 import type { ScrapedContact } from "../tools/enrich/impressum-scraper.js";
 import { discoverLeads } from "./discover.js";
+import {
+  loadChainBranchPatterns,
+  matchesChainBranch,
+  appendFilteredChainBranchLog,
+  type ChainBranchPattern,
+} from "./chain-filter.js";
+import { dedupeChainApices } from "./chain-apex-dedupe.js";
+import { dedupeByNormalizedUrl } from "./url-dedupe.js";
+import { writeLastRunSummary } from "../reports/last-run-summary.js";
+import { rowToExportShape } from "./export.js";
+import type { AuditResult } from "../db/schema.js";
+import { resolve } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
 import { classifyTier } from "./tier-classifier.js";
 import { checkTransport } from "./ssl-check.js";
 import { checkViewport } from "./viewport-check.js";
 import { detectTechStack } from "./tech-stack.js";
+import { detectCms } from "./cms-detect.js";
+import { detectLastModifiedYear } from "./last-modified-detect.js";
 import { extractSocialLinks } from "./social-links.js";
 import { detectSchemaOrg } from "./schema-org.js";
 import { fetchAndParseImpressum } from "./impressum.js";
@@ -69,7 +84,32 @@ export interface AuditRunOptions {
   // at a throwaway temp dir so runs don't leak into production caches.
   impressumFetch?: typeof import("../lib/http-fetch.js").fetchUrl;
   impressumCacheDir?: string;
+  // FIX 5: chain-branch filter hooks. `chainBranchesConfig` points at a
+  // custom YAML file (default: ./config/chain_branches.yml). `logDir` is
+  // the directory where logs/filtered_chain_branches.csv lands — tests
+  // redirect it to a tmp dir so real `logs/` is never touched.
+  chainBranchesConfig?: string;
+  logDir?: string;
+  // FIX 6 test hook: injectable apex auditor. Production callers leave
+  // this undefined — the default path runs a real `auditOne` against a
+  // synthetic apex candidate. Tests pass a mock that returns a scored
+  // UpsertAuditInput without touching the network.
+  auditApex?: (apex: string) => Promise<UpsertAuditInput | null>;
+  // FIX 14: override the output path for `reports/last_run_summary.md`.
+  // Tests redirect to a tmp dir. Production callers leave undefined.
+  reportPath?: string;
 }
+
+// Default locations. `logs/` is created lazily on first filter-hit.
+const DEFAULT_CHAIN_BRANCHES_CONFIG = resolve(
+  process.cwd(),
+  "config/chain_branches.yml",
+);
+const DEFAULT_LOG_DIR = resolve(process.cwd(), "logs");
+const DEFAULT_REPORT_PATH = resolve(
+  process.cwd(),
+  "reports/last_run_summary.md",
+);
 
 // Top-level entry: discover candidates, fan out via the host limiter,
 // swallow per-candidate failures. One bad lead never aborts the run.
@@ -85,18 +125,153 @@ export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
       `)`,
   );
 
+  // Load chain-branch patterns once per run. Parse errors surface here
+  // rather than at per-row match time, so a malformed YAML fails the run
+  // early instead of silently dropping the filter.
+  const chainPatterns = loadChainPatternsSafe(options);
+
+  // Collect per-row audit results (null = dropped by auditOne or chain-
+  // branch filter). The batch-stage apex dedupe runs AFTER all per-row
+  // work completes so it can see the full group of Tier-A rows that
+  // share an apex.
+  const collected: UpsertAuditInput[] = [];
   let done = 0;
   const tasks = candidates.map((c) =>
     schedule(hostOf(c), async () => {
-      await processOne(c, options).catch((err) => {
+      try {
+        const row = await processOne(c, options, chainPatterns);
+        if (row !== null) collected.push(row);
+      } catch (err) {
         log.error(`audit failed for ${c.placeId}`, (err as Error).message);
-      });
+      }
       done += 1;
       if (done % 50 === 0) log.info(`progress: ${done}/${candidates.length}`);
     }),
   );
   await Promise.all(tasks);
+
+  // FIX 6: chain-apex dedupe. Batch operation over all Tier-A survivors
+  // that still have a discoveredUrl. Clean-apex groups drop their
+  // branches; bad-apex groups collapse to a single canonical row.
+  const logDir = options.logDir ?? DEFAULT_LOG_DIR;
+  const apexAuditor =
+    options.auditApex ?? ((apex: string) => defaultApexAudit(apex, options));
+  const dedupe = await dedupeChainApices(collected, {
+    auditApex: apexAuditor,
+    logDir,
+  });
+  log.info(
+    `apex dedupe: collapsed=${dedupe.collapsedGroups} branches dropped=${dedupe.droppedBranches} collapsed=${dedupe.collapsedBranches}`,
+  );
+
+  // FIX 12: URL-level dedupe. Two rows reaching the same normalized URL
+  // (after stripping www., trailing /, utm_*, tracking params, fragment,
+  // and punycode-encoding IDN hosts) are collapsed to the highest-score
+  // row (ties broken by earliest audited_at). Runs AFTER chain-apex
+  // dedupe so apex collapses feed into URL dedupe rather than competing.
+  const urlDedupe = dedupeByNormalizedUrl(dedupe.survivors, { logDir });
+  log.info(`url dedupe: dropped=${urlDedupe.droppedCount}`);
+
+  // Apply the --onlyTier flag at the final persist stage so dedupe sees
+  // the full Tier-A population (an --onlyTier=B run still wants chain
+  // filtering for the A rows it produces, not that it persists any).
+  const finalRows = options.onlyTier
+    ? urlDedupe.survivors.filter((r) => r.tier === options.onlyTier)
+    : urlDedupe.survivors;
+
+  for (const row of finalRows) {
+    try {
+      await upsertAudit(row);
+    } catch (err) {
+      log.warn(
+        `upsert failed for ${row.placeId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // FIX 14: emit the human-readable run summary. Convert the persisted
+  // UpsertAuditInput rows to the frozen ExportRow shape so the report
+  // reads the same 25-column contract as the CSV/JSON exports. Failures
+  // here must not abort the run — the DB writes already succeeded.
+  try {
+    const exportRows = finalRows.map((r) =>
+      rowToExportShape(r as unknown as AuditResult),
+    );
+    writeLastRunSummary(
+      {
+        rows: exportRows,
+        droppedCounts: {
+          filteredChainBranches: countCsvDataRows(
+            resolve(logDir, "filtered_chain_branches.csv"),
+          ),
+          collapsedBranches: dedupe.droppedBranches + dedupe.collapsedBranches,
+          duplicateUrls: urlDedupe.droppedCount,
+        },
+        runTimestamp: new Date(),
+      },
+      options.reportPath ?? DEFAULT_REPORT_PATH,
+    );
+  } catch (err) {
+    log.warn(`run-summary write failed: ${(err as Error).message}`);
+  }
+
   log.info(`audit done: ${done}/${candidates.length}`);
+}
+
+// Counts data rows (total lines minus header). Returns 0 if the CSV was
+// never created during this run — absent file means "no drops".
+function countCsvDataRows(path: string): number {
+  if (!existsSync(path)) return 0;
+  const txt = readFileSync(path, "utf8").trim();
+  if (txt.length === 0) return 0;
+  return Math.max(0, txt.split("\n").length - 1);
+}
+
+// Default apex auditor: builds a synthetic PlaceCandidate for the apex
+// homepage and runs the full auditOne path against it. Reuses every
+// signal collector so the decision (drop vs collapse) is grounded in
+// the same scoring model we use for real rows.
+async function defaultApexAudit(
+  apex: string,
+  options: AuditRunOptions,
+): Promise<UpsertAuditInput | null> {
+  const syntheticCandidate: PlaceCandidate = {
+    placeId: `apex:${apex}`,
+    name: apex,
+    address: null,
+    plz: null,
+    district: null,
+    types: [],
+    primaryType: null,
+    website: `https://${apex}/`,
+    phone: null,
+    lat: 0,
+    lng: 0,
+  };
+  try {
+    return await auditOne(syntheticCandidate, options);
+  } catch (err) {
+    log.warn(`apex audit failed for ${apex}: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+function loadChainPatternsSafe(
+  options: AuditRunOptions,
+): ChainBranchPattern[] {
+  const path = options.chainBranchesConfig ?? DEFAULT_CHAIN_BRANCHES_CONFIG;
+  try {
+    return loadChainBranchPatterns(path);
+  } catch (err) {
+    // Missing default config is tolerated (e.g. fresh checkout without the
+    // YAML). A custom path that fails to load is an explicit user choice
+    // and re-thrown.
+    if (options.chainBranchesConfig) throw err;
+    log.warn(
+      `chain-branch filter disabled: ${(err as Error).message} (at ${path})`,
+    );
+    return [];
+  }
 }
 
 function hostOf(c: PlaceCandidate): string {
@@ -108,28 +283,59 @@ function hostOf(c: PlaceCandidate): string {
   }
 }
 
+// processOne now returns the audit row instead of persisting it. The
+// caller (runAudit) batches all rows, runs chain-apex dedupe, and then
+// upserts the survivors. Returns null when the row was dropped (cache
+// hit, auditOne returned null, or chain-branch filter matched).
 async function processOne(
   candidate: PlaceCandidate,
   options: AuditRunOptions,
-): Promise<void> {
+  chainPatterns: ChainBranchPattern[],
+): Promise<UpsertAuditInput | null> {
   if (!options.forceRefresh) {
     const cached = await checkAuditCache(candidate.placeId);
     if (cached.staticFresh && cached.psiFresh) {
       log.debug(`skip ${candidate.placeId} (cache hit)`);
-      return;
+      return null;
     }
   }
   try {
     const row = await auditOne(candidate, options);
     if (row === null) {
       // Dropped by enrichment (CLOSED_PERMANENTLY) — no DB row written.
-      return;
+      return null;
     }
-    if (options.onlyTier && row.tier !== options.onlyTier) return;
-    await upsertAudit(row);
+    // FIX 5: chain-branch filter. Runs AFTER parking detection (which
+    // happens inside auditOne) and BEFORE chain-apex dedupe (FIX 6).
+    // Matched rows are logged and removed from the stage1 stream; they
+    // never reach the dedupe stage or audit_results.
+    if (row.discoveredUrl && chainPatterns.length > 0) {
+      const match = matchesChainBranch(row.discoveredUrl, chainPatterns);
+      if (match) {
+        const logDir = options.logDir ?? DEFAULT_LOG_DIR;
+        const csvPath = resolve(logDir, "filtered_chain_branches.csv");
+        appendFilteredChainBranchLog(
+          {
+            place_id: row.placeId,
+            chain_name: match.chain_name,
+            url: row.discoveredUrl,
+            matched_pattern: match.matched_pattern,
+            reason: match.reason,
+            filtered_at: new Date(),
+          },
+          csvPath,
+        );
+        log.info(
+          `chain-branch filter: drop ${row.placeId} (${match.chain_name}, ${match.matched_pattern})`,
+        );
+        return null;
+      }
+    }
+    return row;
   } catch (err) {
     log.warn(`auditOne threw for ${candidate.placeId}`, (err as Error).message);
     await markAuditError(candidate.placeId, "UNKNOWN", null);
+    return null;
   }
 }
 
@@ -289,6 +495,11 @@ function classifyIntentTier(
     return "LIVE";
   }
   if (tier === "C") return "DEAD";
+  // FIX 4: tier B3 means we never found a URL for this lead. The domain-
+  // level signal is "no website at all", not the legacy NONE catch-all.
+  // Tier B1/B2 (social/directory-only) stay NONE because they do have
+  // *some* web surface, just not a primary site.
+  if (tier === "B3") return "DEAD_WEBSITE";
   return "NONE";
 }
 
@@ -305,7 +516,7 @@ async function runDiscovery(candidate: PlaceCandidate): Promise<DiscoveryOutcome
     return await probeHome(candidate.website, "osm-tag", base);
   }
   const dns = await discoverViaDns(candidate);
-  if (dns?.validated) {
+  if (dns.found && dns.validated) {
     return await probeHome(dns.candidateUrl, "dns-probe", base);
   }
   const cse = await discoverViaCse(candidate);
@@ -397,12 +608,27 @@ async function gatherSignals(
     checkTransport(host),
     fetchAndParseImpressum(url),
   ]);
+  const tech = detectTechStack(body, headers).signals;
+  // FIX 10 — cascaded CMS detector. Produces a single canonical slug that
+  // replaces the tech-stack fingerprint's cms array for this row. Steps B/C/D
+  // use weaker evidence than the MIN_MATCHES=2 fingerprint, so running them
+  // AFTER detectTechStack ensures the high-confidence fingerprint still wins.
+  // On Tier-A rows with a robots-disallowed skip or an empty body, the
+  // detector collapses to "unknown".
+  const cmsResult = detectCms({ body, headers, existingCms: tech.cms });
+  tech.cms = [cmsResult.cms];
+  // FIX 11 — cascaded last-modified detector. Fail-safe by construction: on
+  // any internal exception the module logs a warning and returns null, so
+  // the rest of the signal pipeline still runs. Result is informational
+  // (no scoring impact in Phase 4).
+  const { year: lastModifiedSignal } = detectLastModifiedYear({ body, headers });
   return {
     ssl,
     viewport: checkViewport(body),
-    tech: detectTechStack(body, headers).signals,
+    tech,
     social: extractSocialLinks(body),
     schema: detectSchemaOrg(body),
     impressum,
+    lastModifiedSignal,
   };
 }

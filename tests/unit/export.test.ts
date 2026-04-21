@@ -28,24 +28,32 @@ const EMPTY_TECH: TechStackSignals = {
 const EMPTY_SOCIAL: SocialLinks = {};
 
 function row(overrides: Partial<ExportRow> = {}): ExportRow {
+  // Key order below matches STAGE1_COLUMNS (FIX 13). The
+  // `assertColumnOrder` check inside `rowToExportShape` enforces this at
+  // runtime; tests that build rows by hand need the same discipline.
   return {
     place_id: "p1",
     tier: "A",
+    sub_tier: null,
     intent_tier: null,
+    chain_detected: false,
+    chain_name: null,
+    branch_count: 1,
     score: 10,
     name: "Test",
     url: "https://example.at",
     phone: null,
     email: null,
-    email_is_generic: false,
+    email_is_generic: null,
     address: null,
     plz: null,
     uid: null,
     impressum_complete: null,
-    coverage: "",
     psi_mobile_performance: null,
     ssl_valid: null,
     cms: "",
+    has_structured_data: null,
+    last_modified_signal: null,
     has_social: false,
     audited_at: new Date("2026-04-01T00:00:00.000Z"),
     score_breakdown: [],
@@ -100,6 +108,11 @@ function auditRow(overrides: Partial<AuditResult> = {}): AuditResult {
     staticSignalsExpiresAt: new Date("2026-05-10T12:00:00.000Z"),
     psiSignalsExpiresAt: null,
     score: 3,
+    chainDetected: false,
+    chainName: null,
+    branchCount: 1,
+    lastModifiedSignal: null,
+    hasStructuredData: false,
     ...overrides,
   } as AuditResult;
 }
@@ -184,38 +197,39 @@ describe("toCsv — byte-level invariants", () => {
 
   it("columns are semicolon-separated", () => {
     const header = csv.replace("\uFEFF", "").split("\r\n")[0]!;
-    expect(header.split(";")).toHaveLength(20);
+    expect(header.split(";")).toHaveLength(25);
     expect(header.split(";")[0]).toBe("place_id");
   });
 
   it("booleans become 1/0", () => {
-    // ssl_valid column (index 15 zero-based) is "1" for true.
+    // ssl_valid column (index 18 zero-based under STAGE1_COLUMNS) is "1".
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[15]).toBe("1");
+    expect(cells[18]).toBe("1");
   });
 
   it("epoch-ms dates become ISO date (yyyy-mm-dd)", () => {
     const row2 = toCsv([r]).split("\r\n")[1]!;
     const cells = row2.split(";");
-    expect(cells[18]).toBe("2026-04-10");
+    // audited_at is index 23 under STAGE1_COLUMNS.
+    expect(cells[23]).toBe("2026-04-10");
   });
 
   it("null fields become empty string", () => {
     const r2 = row({ email: null, phone: null });
     const line = toCsv([r2]).split("\r\n")[1]!;
     const cells = line.split(";");
-    // email is column index 7, phone index 6.
-    expect(cells[6]).toBe("");
-    expect(cells[7]).toBe("");
+    // phone is column index 10, email index 11.
+    expect(cells[10]).toBe("");
+    expect(cells[11]).toBe("");
   });
 
   it('embedded " is doubled and wrapped in quotes', () => {
     const r2 = row({ name: 'He said "hi"' });
     const line = toCsv([r2]).split("\r\n")[1]!;
-    // name is index 4. Whole cell wrapped in quotes; inner " doubled.
+    // name is index 8. Whole cell wrapped in quotes; inner " doubled.
     const cells = line.split(";");
-    expect(cells[4]).toBe('"He said ""hi"""');
+    expect(cells[8]).toBe('"He said ""hi"""');
   });
 
   it("semicolon inside a cell triggers quoting", () => {
@@ -250,22 +264,22 @@ describe("toJson — shape invariants", () => {
 });
 
 describe("rowToExportShape", () => {
-  it("email_is_generic=true when email appears in genericEmails", () => {
-    const db = auditRow({
-      impressumEmail: "info@example.at",
-      genericEmails: ["info@example.at", "office@example.at"],
-    });
+  it("email_is_generic=1 when email local-part is a generic role (info@)", () => {
+    const db = auditRow({ impressumEmail: "info@example.at" });
     const shape = rowToExportShape(db, { warn: () => {} });
-    expect(shape.email_is_generic).toBe(true);
+    expect(shape.email_is_generic).toBe(1);
   });
 
-  it("email_is_generic=false when email is specific", () => {
-    const db = auditRow({
-      impressumEmail: "max.mustermann@example.at",
-      genericEmails: ["info@example.at"],
-    });
+  it("email_is_generic=0 when email is a personal mailbox", () => {
+    const db = auditRow({ impressumEmail: "max.mustermann@example.at" });
     const shape = rowToExportShape(db, { warn: () => {} });
-    expect(shape.email_is_generic).toBe(false);
+    expect(shape.email_is_generic).toBe(0);
+  });
+
+  it("email_is_generic=null when no email was discovered", () => {
+    const db = auditRow({ impressumEmail: null });
+    const shape = rowToExportShape(db, { warn: () => {} });
+    expect(shape.email_is_generic).toBeNull();
   });
 
   it("name falls back from hostname when impressum_company_name is null", () => {
@@ -300,19 +314,18 @@ describe("rowToExportShape", () => {
     expect(warned[0]).toMatch(/\(unexplained\)/);
   });
 
-  // Inference-Patch (§K): HAS_STRUCTURED_DATA is not persisted on
-  // audit_results, so rebuildScoreInput assumes false. A gap of exactly
-  // +1 between recomputed and stored is mathematically unambiguous and
-  // gets inferred into the breakdown silently (no warn).
-  it("T-Inf-1: gap=1 → HAS_STRUCTURED_DATA injected, breakdown sum == stored", () => {
+  // #22: HAS_STRUCTURED_DATA is now persisted on audit_results. The
+  // exporter no longer infers it from the score gap; scoreBreakdown()
+  // emits the entry directly when row.hasStructuredData is true.
+  it("T-Inf-1: hasStructuredData=true → HAS_STRUCTURED_DATA in breakdown, no warn", () => {
     const warned: string[] = [];
-    // Signals that sum to 8 pre-inference:
+    // Signals that sum to 7 with schema.org bonus:
     //   NO_SSL +3, NO_HTTPS_REDIRECT +2, NO_ANALYTICS +1,
-    //   NO_MODERN_TRACKING +1, NO_SOCIAL_LINKS +1 = 8
-    // stored=7 → gap=1 → inference injects HAS_STRUCTURED_DATA -1.
+    //   NO_MODERN_TRACKING +1, NO_SOCIAL_LINKS +1, HAS_STRUCTURED_DATA -1 = 7.
     const db = auditRow({
       sslValid: false,
       httpToHttpsRedirect: false,
+      hasStructuredData: true,
       score: 7,
     });
     const shape = rowToExportShape(db, { warn: (m) => warned.push(m) });
@@ -322,6 +335,25 @@ describe("rowToExportShape", () => {
     expect(shape.score_breakdown.map((e) => e.key)).toContain(
       "HAS_STRUCTURED_DATA",
     );
+  });
+
+  // #22: legacy row (hasStructuredData=null) where the auditor DID fire
+  // HAS_STRUCTURED_DATA at audit-time but the column was unavailable.
+  // rebuildScoreInput coerces null→false, so recomputed > stored by 1 and
+  // the generic "(unexplained)" warn fires. This is the deliberate cost of
+  // dropping the inference block — operators see the legacy drift instead
+  // of having it silently papered over.
+  it("T-Inf-1b: legacy hasStructuredData=null with gap=1 → warn '(unexplained)'", () => {
+    const warned: string[] = [];
+    const db = auditRow({
+      sslValid: false,
+      httpToHttpsRedirect: false,
+      hasStructuredData: null,
+      score: 7,
+    });
+    rowToExportShape(db, { warn: (m) => warned.push(m) });
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatch(/\(unexplained\)/);
   });
 
   it("T-Inf-2: recomputed == stored → no injection, no warn", () => {
@@ -359,5 +391,108 @@ describe("rowToExportShape", () => {
     expect(shape.score_breakdown.map((e) => e.key)).not.toContain(
       "HAS_STRUCTURED_DATA",
     );
+  });
+});
+
+describe("rowToExportShape — FIX 3 invariants", () => {
+  it("emits score AS STORED — no fallback when null", () => {
+    // Under the old rule, score=null would be silently replaced by the
+    // recomputed breakdown sum. FIX 3 removes that fallback.
+    const db = auditRow({ tier: "C", score: null, intentTier: null });
+    const shape = rowToExportShape(db);
+    expect(shape.score).toBeNull();
+  });
+
+  it("emits score AS STORED — no fallback when non-null but disagreeing", () => {
+    // Stored score=99 must come through untouched; the recomputed breakdown
+    // sum is for the score_breakdown column only.
+    const db = auditRow({ score: 99 });
+    const warned: string[] = [];
+    const shape = rowToExportShape(db, { warn: (m) => warned.push(m) });
+    expect(shape.score).toBe(99);
+  });
+
+  it("tier='C' with intent_tier=PARKED and non-null score is allowed", () => {
+    const db = auditRow({
+      tier: "C",
+      intentTier: "PARKED",
+      score: 12,
+      discoveredUrl: "https://parked.example.at",
+    });
+    expect(() => rowToExportShape(db)).not.toThrow();
+  });
+
+  it("tier='C' with intent_tier=null and null score is allowed (error row)", () => {
+    const db = auditRow({ tier: "C", intentTier: null, score: null });
+    expect(() => rowToExportShape(db)).not.toThrow();
+  });
+
+  it("throws when tier='C' carries intent_tier='LIVE' (not in allowed set)", () => {
+    // Give a non-null score so invariant (3) fires, not invariant (2).
+    const db = auditRow({
+      tier: "C",
+      intentTier: "LIVE",
+      score: 5,
+      placeId: "bad:1",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:1.*tier='C'.*LIVE/);
+  });
+
+  it("throws when tier='C' carries intent_tier='DEAD' (DEAD belongs on B3, not C)", () => {
+    const db = auditRow({
+      tier: "C",
+      intentTier: "DEAD",
+      score: 5,
+      placeId: "bad:2",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:2.*DEAD/);
+  });
+
+  it("throws when tier='C' with intent_tier=null has non-null score", () => {
+    const db = auditRow({
+      tier: "C",
+      intentTier: null,
+      score: 5,
+      placeId: "bad:3",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:3.*score=null/);
+  });
+
+  it("throws when intent_tier='LIVE' but score is null (non-error)", () => {
+    const db = auditRow({
+      tier: "A",
+      intentTier: "LIVE",
+      score: null,
+      placeId: "bad:4",
+    });
+    expect(() => rowToExportShape(db)).toThrow(/bad:4.*intent_tier=LIVE/);
+  });
+
+  it("tier='B3' with intent_tier=DEAD_WEBSITE and score=10 is allowed (FIX 4)", () => {
+    const db = auditRow({
+      tier: "B3",
+      intentTier: "DEAD_WEBSITE",
+      score: 10,
+      discoveredUrl: null,
+    });
+    expect(() => rowToExportShape(db)).not.toThrow();
+  });
+
+  it("filterRows drops null-score rows regardless of min/max", () => {
+    const rows: ExportRow[] = [
+      row({ place_id: "ok", score: 10, tier: "A" }),
+      row({ place_id: "err", score: null, tier: "C" }),
+    ];
+    const out = filterRows(rows, defaultFilter({ minScore: 0, maxScore: 30 }));
+    expect(out.map((r) => r.place_id)).toEqual(["ok"]);
+  });
+
+  it("sortRows puts null-score rows at the bottom", () => {
+    const rows: ExportRow[] = [
+      row({ place_id: "err", score: null, tier: "C" }),
+      row({ place_id: "ok", score: 10, tier: "A" }),
+    ];
+    const sorted = sortRows(rows);
+    expect(sorted.map((r) => r.place_id)).toEqual(["ok", "err"]);
   });
 });

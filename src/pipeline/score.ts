@@ -1,20 +1,33 @@
 import type {
   Tier,
   IntentTier,
+  SubTier,
   TechStackSignals,
   SocialLinks,
 } from "../models/audit.js";
+
+// FIX 7 — market-weakness anchor. NO_WEBSITE must outrank every realistic
+// Tier-A record so that "no web presence at all" always sorts above any
+// in-market shop with degraded signals. Current realistic Tier-A maximum is
+// ≈14 (Phase 2A field samples), theoretical maximum is 19 (all Tier-A
+// positive weights summed). 20 leaves 6-point headroom; if a future penalty
+// lifts the Tier-A ceiling to >=19, raise this constant and re-document in
+// ARCHITECTURE_MAP.md > "Scoring rules". Exported so the property-based
+// test and assertExportInvariants can anchor on it directly.
+export const NO_WEBSITE_PENALTY = 20;
 
 // Signed weights. Positive = "worse web presence", negative = "actively good".
 // The clamp to [0, 30] at the bottom means best-case Tier-A sites floor at 0;
 // anything in the negative band is a strong signal to skip outreach entirely.
 export const SCORING_WEIGHTS = {
-  NO_WEBSITE: 10,
+  NO_WEBSITE: NO_WEBSITE_PENALTY,
   // Domain registered but only a parking page served. Ranked above
   // NO_WEBSITE/DEAD_WEBSITE because the owner already spent money on the
   // domain and signalled purchase intent. Replaces DEAD_WEBSITE for
-  // C-rows with intent_tier=PARKED (see scoreBreakdown below).
-  DOMAIN_REGISTERED_NO_SITE: 12,
+  // C-rows with intent_tier=PARKED (see scoreBreakdown below). Lifted
+  // alongside NO_WEBSITE in FIX 7 to preserve the PARKED > NO_WEBSITE
+  // business invariant.
+  DOMAIN_REGISTERED_NO_SITE: NO_WEBSITE_PENALTY + 2,
   DEAD_WEBSITE: 9,
   ONLY_SOCIAL: 7,
   ONLY_DIRECTORY: 6,
@@ -26,7 +39,10 @@ export const SCORING_WEIGHTS = {
   NO_IMPRESSUM: 3,
   IMPRESSUM_INCOMPLETE: 2,
   NO_UID: 1,
-  WIX_OR_JIMDO: 2,
+  // FIX 10 — renamed from WIX_OR_JIMDO. Now fires on wix, jimdo, AND weebly
+  // because the cascaded CMS detector maps all three to canonical slugs and
+  // all three are low-end DIY builders with identical outreach signal.
+  WIX_OR_JIMDO_OR_WEEBLY: 2,
   NO_ANALYTICS: 1,
   NO_MODERN_TRACKING: 1,
   NO_SOCIAL_LINKS: 1,
@@ -42,9 +58,11 @@ export interface BreakdownEntry {
 }
 
 // Tech-stack CMS identifiers considered "budget-tier" for outreach purposes.
-// Wix/Jimdo sites are cheaper to migrate and more likely to need our help —
-// they're a positive signal, not a negative judgement of the tool itself.
-const BUDGET_CMS = new Set(["wix", "jimdo"]);
+// Wix/Jimdo/Weebly sites are cheaper to migrate and more likely to need our
+// help — a positive signal, not a negative judgement of the tool itself.
+// FIX 10 extended this set with weebly alongside renaming the penalty to
+// WIX_OR_JIMDO_OR_WEEBLY.
+const BUDGET_CMS = new Set(["wix", "jimdo", "weebly"]);
 
 export interface ScoreInput {
   tier: Tier;
@@ -119,7 +137,7 @@ export function scoreBreakdown(input: ScoreInput): BreakdownEntry[] {
   if (input.impressumPresent && !input.impressumUid) push("NO_UID");
 
   if (input.techStack.cms.some((c) => BUDGET_CMS.has(c.toLowerCase()))) {
-    push("WIX_OR_JIMDO");
+    push("WIX_OR_JIMDO_OR_WEEBLY");
   }
   if (input.techStack.analytics.length === 0) push("NO_ANALYTICS");
   if (input.techStack.tracking.length === 0) push("NO_MODERN_TRACKING");
@@ -135,4 +153,21 @@ export function computeScore(input: ScoreInput): number {
   // Clamp: unbounded score would make sorting brittle when weights are tuned;
   // 0..30 keeps the CSV-export column comfortable and leaves room at the top.
   return Math.max(0, Math.min(30, sum));
+}
+
+// FIX 8 — sub_tier derivation. Must be called AFTER the score is finalised
+// (clamped). Pure function of (tier, score). Non-A tiers and null scores
+// collapse to null — see assertExportInvariants for the disjoint-states
+// guarantee. Thresholds align with outreach prioritisation:
+//   A1 (score >= 9)  — top-of-list, "Katastrophe"
+//   A2 (5..8)        — warm, "Ausbaufähig"
+//   A3 (<= 4)        — deprioritise, "Eh ok"
+export function computeSubTier(
+  tier: Tier,
+  score: number | null,
+): SubTier {
+  if (tier !== "A" || score === null) return null;
+  if (score >= 9) return "A1";
+  if (score >= 5) return "A2";
+  return "A3";
 }

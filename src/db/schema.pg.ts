@@ -165,7 +165,7 @@ export const auditResults = pgTable(
       mode: "date",
     }),
     intentTier: text("intent_tier", {
-      enum: ["PARKED", "DEAD", "LIVE", "NONE"],
+      enum: ["PARKED", "DEAD", "DEAD_WEBSITE", "LIVE", "NONE"],
     }),
     staticSignalsExpiresAt: timestamp("static_signals_expires_at", {
       withTimezone: true,
@@ -176,6 +176,19 @@ export const auditResults = pgTable(
       mode: "date",
     }),
     score: integer("score"),
+    // FIX 6: chain-apex dedupe columns (see schema.sqlite.ts). PG
+    // migration deferred to Phase 5; the type declarations here keep
+    // `UpsertAuditInput` and drizzle select-types aligned across dialects
+    // even though live PG databases don't have the columns yet. Do NOT
+    // deploy against PG until the Phase 5 migration lands.
+    chainDetected: boolean("chain_detected").notNull().default(false),
+    chainName: text("chain_name"),
+    branchCount: integer("branch_count").notNull().default(1),
+    // FIX 11: site-freshness signal (year only, nullable). See
+    // schema.sqlite.ts for semantics. PG mirror stays in lock-step.
+    lastModifiedSignal: integer("last_modified_signal"),
+    // #22: persisted schema.org/JSON-LD signal. See schema.sqlite.ts.
+    hasStructuredData: boolean("has_structured_data"),
   },
   (t) => ({
     tierIdx: index("idx_audit_tier").on(t.tier),
