@@ -21,7 +21,11 @@ import {
 } from "./chain-filter.js";
 import { dedupeChainApices } from "./chain-apex-dedupe.js";
 import { dedupeByNormalizedUrl } from "./url-dedupe.js";
+import { writeLastRunSummary } from "../reports/last-run-summary.js";
+import { rowToExportShape } from "./export.js";
+import type { AuditResult } from "../db/schema.js";
 import { resolve } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
 import { classifyTier } from "./tier-classifier.js";
@@ -91,6 +95,9 @@ export interface AuditRunOptions {
   // synthetic apex candidate. Tests pass a mock that returns a scored
   // UpsertAuditInput without touching the network.
   auditApex?: (apex: string) => Promise<UpsertAuditInput | null>;
+  // FIX 14: override the output path for `reports/last_run_summary.md`.
+  // Tests redirect to a tmp dir. Production callers leave undefined.
+  reportPath?: string;
 }
 
 // Default locations. `logs/` is created lazily on first filter-hit.
@@ -99,6 +106,10 @@ const DEFAULT_CHAIN_BRANCHES_CONFIG = resolve(
   "config/chain_branches.yml",
 );
 const DEFAULT_LOG_DIR = resolve(process.cwd(), "logs");
+const DEFAULT_REPORT_PATH = resolve(
+  process.cwd(),
+  "reports/last_run_summary.md",
+);
 
 // Top-level entry: discover candidates, fan out via the host limiter,
 // swallow per-candidate failures. One bad lead never aborts the run.
@@ -178,7 +189,42 @@ export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
     }
   }
 
+  // FIX 14: emit the human-readable run summary. Convert the persisted
+  // UpsertAuditInput rows to the frozen ExportRow shape so the report
+  // reads the same 25-column contract as the CSV/JSON exports. Failures
+  // here must not abort the run — the DB writes already succeeded.
+  try {
+    const exportRows = finalRows.map((r) =>
+      rowToExportShape(r as unknown as AuditResult),
+    );
+    writeLastRunSummary(
+      {
+        rows: exportRows,
+        droppedCounts: {
+          filteredChainBranches: countCsvDataRows(
+            resolve(logDir, "filtered_chain_branches.csv"),
+          ),
+          collapsedBranches: dedupe.droppedBranches + dedupe.collapsedBranches,
+          duplicateUrls: urlDedupe.droppedCount,
+        },
+        runTimestamp: new Date(),
+      },
+      options.reportPath ?? DEFAULT_REPORT_PATH,
+    );
+  } catch (err) {
+    log.warn(`run-summary write failed: ${(err as Error).message}`);
+  }
+
   log.info(`audit done: ${done}/${candidates.length}`);
+}
+
+// Counts data rows (total lines minus header). Returns 0 if the CSV was
+// never created during this run — absent file means "no drops".
+function countCsvDataRows(path: string): number {
+  if (!existsSync(path)) return 0;
+  const txt = readFileSync(path, "utf8").trim();
+  if (txt.length === 0) return 0;
+  return Math.max(0, txt.split("\n").length - 1);
 }
 
 // Default apex auditor: builds a synthetic PlaceCandidate for the apex
