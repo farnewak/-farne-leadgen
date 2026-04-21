@@ -16,4 +16,7 @@ dashboard/node_modules/
 # Claude Code personal settings
 .claude/settings.local.json
 runs/
-/reports/
+# /reports/ is per-run local scratch by default. Stage-1 schema-diff
+# reports are a design artefact — track them in git.
+/reports/*
+!/reports/stage1_diff_*.md

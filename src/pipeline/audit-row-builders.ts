@@ -159,7 +159,12 @@ export function assembleAuditRow(
     impressumPresent: signals.impressum.present,
     impressumUid: signals.impressum.uid,
     impressumCompanyName: signals.impressum.companyName,
-    impressumAddress: signals.impressum.address,
+    // Phase 6b wiring: when the impressum scraper returns no address, keep
+    // the OSM candidate address so downstream (CSV PLZ filter, Bezirk
+    // analytics) can still locate the business. `buildEmptyTierRow` already
+    // did the equivalent for B3 rows; Tier-A rows silently dropped the
+    // signal, which caused the 51→34 row loss in the Bezirk-1010 smoke.
+    impressumAddress: signals.impressum.address ?? candidate.address,
     impressumPhone: signals.impressum.phone,
     impressumEmail: signals.impressum.email,
     impressumComplete: signals.impressum.complete,

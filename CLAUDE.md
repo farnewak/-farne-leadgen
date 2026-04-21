@@ -309,6 +309,19 @@ Dynamisch: siehe `src/pipeline/chainfilter.ts` — Kette wenn >3 Standorte
       Status → Throw, Invalid-Channel → Throw, Bulk-CSV mit 10 Rows
       inkl. quoted note, Bulk-CSV-Validation (kein Partial-Commit),
       JSONL-Schema-Snapshot, Stderr-Warning bei missing audit row.
+30. Name-Leakage in `impressum_company_name` (Phase 6 smoke
+    Bezirk 1010): mehrere Tier-A-Rows tragen Impressum-Fließtext
+    statt Firmenname — z. B. "Ernst Kankovsky ​ Telefon: +43 (0) 1
+    - 512 72 79 ​ E-Mail: info@caferonacher.com …" und
+    "Österreichische Apotheker-Verlagsgesellschaft m.b.H.
+    Unternehmensgegenstand: Herausgabe und Verschleiß …".
+    Ursache wahrscheinlich im Impressum-Scraper
+    (`src/tools/enrich/impressum-scraper.ts`): `companyName` wird
+    aus einem zu weit gefassten DOM-Selector gegriffen, wenn es
+    kein `<strong>`/`<h2>`-Firmenname-Marker gibt. Fix-Idee:
+    strenger Cap (max 80 Zeichen + Newline-Abbruch) + Heuristik
+    "erste Zeile ohne Telefon/Mail/Straßen-Keyword". Symptome
+    dokumentiert in `reports/last_run_summary.md` Sektion (f).
 
 ## Was NICHT tun
 

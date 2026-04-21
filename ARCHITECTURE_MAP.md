@@ -293,7 +293,8 @@ row's key sequence drifts from `STAGE1_COLUMNS`.
   `toCsv(rows)` (EU-Excel BOM + `;` separator + CRLF — header emitted
   directly from `STAGE1_COLUMNS`), `toJson(rows)` (ISO dates, schema-
   ordered keys), `hostnameFallback(url)`, `extractPlzFromAddress(address)`.
-- **`src/cli/export.ts`** — `main()`. CLI for CSV/JSON dump; accepts `--bezirk`, `--plz`, `--tier`, `--min-score`, `--max-score`, `--limit`, `--format`, `--output`.
+- **`src/cli/export.ts`** — `main()`. CLI for CSV/JSON dump; accepts `--bezirk`, `--plz`, `--plz-fallback`, `--tier`, `--min-score`, `--max-score`, `--limit`, `--format`, `--output`.
+- **`src/cli/plz-filter.ts`** — `effectivePlz(sources, mode)`, `parsePlzFallbackMode(raw)`. PLZ coalesce chain (`impressumPlz → osmAddrPostcode → regex /\b(1[0-2]\d0)\b/ on name+url`). `--plz-fallback` modes: `strict` (pre-6b impressum-only), `permissive` (default; recovers Bezirk-scan rows whose impressum scraper returned no address), `off` (disables PLZ filter entirely).
 - **`src/db/export-queries.ts`** — `loadAuditRows()`. Drizzle query that feeds rows into `rowToExportShape()`.
 
 ## Persistence
