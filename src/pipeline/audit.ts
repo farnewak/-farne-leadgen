@@ -27,6 +27,7 @@ import { classifyTier } from "./tier-classifier.js";
 import { checkTransport } from "./ssl-check.js";
 import { checkViewport } from "./viewport-check.js";
 import { detectTechStack } from "./tech-stack.js";
+import { detectCms } from "./cms-detect.js";
 import { extractSocialLinks } from "./social-links.js";
 import { detectSchemaOrg } from "./schema-org.js";
 import { fetchAndParseImpressum } from "./impressum.js";
@@ -551,10 +552,19 @@ async function gatherSignals(
     checkTransport(host),
     fetchAndParseImpressum(url),
   ]);
+  const tech = detectTechStack(body, headers).signals;
+  // FIX 10 — cascaded CMS detector. Produces a single canonical slug that
+  // replaces the tech-stack fingerprint's cms array for this row. Steps B/C/D
+  // use weaker evidence than the MIN_MATCHES=2 fingerprint, so running them
+  // AFTER detectTechStack ensures the high-confidence fingerprint still wins.
+  // On Tier-A rows with a robots-disallowed skip or an empty body, the
+  // detector collapses to "unknown".
+  const cmsResult = detectCms({ body, headers, existingCms: tech.cms });
+  tech.cms = [cmsResult.cms];
   return {
     ssl,
     viewport: checkViewport(body),
-    tech: detectTechStack(body, headers).signals,
+    tech,
     social: extractSocialLinks(body),
     schema: detectSchemaOrg(body),
     impressum,

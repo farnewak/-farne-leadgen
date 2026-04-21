@@ -96,5 +96,19 @@
     "phone": null,
     "lat": 48.2,
     "lng": 16.34
+  },
+  {
+    "id": "R6_wordpress_dated",
+    "placeId": "osm:node:100000008",
+    "name": "WordPress Ladenbau Wien",
+    "address": "Handwerksweg 5, 1060 Wien",
+    "plz": "1060",
+    "district": "Mariahilf",
+    "types": ["shop=carpenter"],
+    "primaryType": "carpenter",
+    "website": "https://wp-ladenbau.at/",
+    "phone": "+43 1 777 2020",
+    "lat": 48.197,
+    "lng": 16.344
   }
 ]

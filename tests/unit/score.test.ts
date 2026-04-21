@@ -315,7 +315,22 @@ describe("computeSubTier — Tier-A boundaries", () => {
 // site, regardless of which specific penalties fire.
 describe("Tier-A score < NO_WEBSITE_PENALTY (property)", () => {
   it("holds for 200 random Tier-A signal combinations", () => {
-    const cmsPool = fc.constantFrom("wix", "wordpress", "jimdo", "joomla");
+    // FIX 10 — generator now includes the full cascaded-detector slug set
+    // so the property test also covers the new canonical values (nextjs,
+    // weebly, static_or_custom, etc.). weebly shares the budget-CMS penalty
+    // with wix/jimdo so the property holds even when it is picked.
+    const cmsPool = fc.constantFrom(
+      "wix",
+      "wordpress",
+      "jimdo",
+      "weebly",
+      "joomla",
+      "nextjs",
+      "nuxt",
+      "gatsby",
+      "static_or_custom",
+      "unknown",
+    );
     const psiArb = fc.oneof(
       fc.constant<number | null>(null),
       fc.integer({ min: 0, max: 100 }),

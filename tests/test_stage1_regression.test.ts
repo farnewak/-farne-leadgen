@@ -94,11 +94,16 @@ function freshDb(): void {
 function loadFixtures(): PlaceCandidate[] {
   const raw = readFileSync(FIXTURE_PATH, "utf-8");
   const records = JSON.parse(raw) as FixtureRecord[];
-  // Regression lock covers only the original R1/R2/R3 baseline. R4*/R5
-  // are exercised by the chain-apex-dedupe integration test; processing
-  // them here would require mocking the apex auditor path.
+  // Regression lock covers R1/R2/R3 baseline plus FIX 10/11 additions (R6).
+  // R4*/R5 are exercised by the chain-apex-dedupe integration test;
+  // processing them here would require mocking the apex auditor path.
   const baseline = records.filter((r) =>
-    ["R1_broken_site", "R2_chain_branch", "R3_nameless_osm"].includes(r.id),
+    [
+      "R1_broken_site",
+      "R2_chain_branch",
+      "R3_nameless_osm",
+      "R6_wordpress_dated",
+    ].includes(r.id),
   );
   // Cast away the null-name escape hatch: the pipeline accepts whatever the
   // discover hook returns, mirroring what OSM would hand over pre-filter.
@@ -292,6 +297,48 @@ describe("stage1 regression lock", () => {
         .reply(404, "")
         .persist();
     }
+
+    // R6: Tier-A WordPress site with a 2020 copyright footer. Exercises
+    // FIX 10 (Step A meta-generator → wordpress, Step B asset path also
+    // matches so the detector's cascade short-circuits at Step A) and
+    // FIX 11 (copyright regex picks up 2020 as last_modified_signal).
+    agent
+      .get("https://wp-ladenbau.at")
+      .intercept({ path: "/", method: "GET" })
+      .reply(
+        200,
+        "<!doctype html><html><head>" +
+          '<meta name="generator" content="WordPress 6.3.1">' +
+          "<title>WP Ladenbau Wien</title></head>" +
+          '<body><link rel="stylesheet" href="/wp-content/themes/foo/style.css">' +
+          "<h1>Ladenbau Wien</h1>" +
+          '<footer>© 2020 WP Ladenbau Wien. Alle Rechte vorbehalten.</footer>' +
+          "</body></html>",
+      )
+      .persist();
+    for (const p of [
+      "/impressum",
+      "/imprint",
+      "/legal",
+      "/kontakt",
+      "/about",
+      "/ueber-uns",
+    ]) {
+      agent
+        .get("https://wp-ladenbau.at")
+        .intercept({ path: p, method: "GET" })
+        .reply(
+          p === "/impressum" ? 200 : 404,
+          p === "/impressum"
+            ? "<!doctype html><html><body>" +
+                "<h1>Impressum</h1>" +
+                "<p>WP Ladenbau Wien e.U.</p>" +
+                "<p>Handwerksweg 5, 1060 Wien</p>" +
+                "</body></html>"
+            : "",
+        )
+        .persist();
+    }
   });
 
   afterEach(async () => {
@@ -308,7 +355,7 @@ describe("stage1 regression lock", () => {
     }
   });
 
-  it("locks the full export row for R1/R3 as-is (R2 filtered by FIX 5)", async () => {
+  it("locks the full export row for R1/R3/R6 as-is (R2 filtered by FIX 5)", async () => {
     const fixtures = loadFixtures();
 
     await runAudit({
@@ -320,8 +367,8 @@ describe("stage1 regression lock", () => {
     const rows = readAuditRows();
     // FIX 5: R2 (EUROSPAR Landstraßer Hauptstraße) matches the
     // `spar.at/standorte/*` chain-branch pattern and is removed from the
-    // stage1 output stream. Only R1 + R3 remain in the DB.
-    expect(rows).toHaveLength(2);
+    // stage1 output stream. R1 + R3 + R6 remain in the DB.
+    expect(rows).toHaveLength(3);
 
     const byId = Object.fromEntries(rows.map((r) => [r.placeId, r]));
 
@@ -329,6 +376,7 @@ describe("stage1 regression lock", () => {
 
     const r1 = rowToExportShape(byId["osm:node:100000001"]!);
     const r3 = rowToExportShape(byId["osm:node:100000003"]!);
+    const r6 = rowToExportShape(byId["osm:node:100000008"]!);
 
     // FIX 5: verify R2 was logged to the filtered-chain-branches CSV.
     const csvPath = resolve(TMP_LOG_DIR, "filtered_chain_branches.csv");
@@ -354,7 +402,7 @@ describe("stage1 regression lock", () => {
         "branch_count": 1,
         "chain_detected": false,
         "chain_name": null,
-        "cms": "",
+        "cms": "static_or_custom",
         "coverage": "A",
         "email": null,
         "email_is_generic": null,
@@ -441,5 +489,15 @@ describe("stage1 regression lock", () => {
         "url": null,
       }
     `);
+    // R6 — Tier-A WordPress site. FIX 10 exercises the meta-generator
+    // step (wins over the /wp-content/ asset path because it short-
+    // circuits after Step A reuse of existing fingerprints which happens
+    // to already match WordPress from MIN_MATCHES=2). Signals mirror R1
+    // (no SSL, no viewport, partial impressum, no analytics/tracking/
+    // social) so the breakdown lands at 14.
+    expect(r6.tier).toBe("A");
+    expect(r6.cms).toBe("wordpress");
+    expect(r6.sub_tier).toBe("A1");
+    expect(r6.score).toBe(14);
   });
 });
