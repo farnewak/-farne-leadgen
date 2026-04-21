@@ -56,7 +56,7 @@ function freshDb(): void {
 //   i=0    → score 0  / Tier A  (all signals clean)
 //   i=1..3 → score 7  / Tier B1 (ONLY_SOCIAL)
 //   i=4..6 → score 6  / Tier B2 (ONLY_DIRECTORY)
-//   i=7..N → score 10 / Tier B3 (NO_WEBSITE)
+//   i=7..N → score 20 / Tier B3 (NO_WEBSITE post FIX 7)
 // All rows are FIX 3 invariant-compliant: a legitimate tier=C row must
 // have score=null + intent_tier∈{null,AUDIT_ERROR,TIMEOUT,PARKED}, so
 // the seed uses tier=B3 for the "no-site" bucket (matches FIX 4 behaviour).
@@ -110,7 +110,7 @@ function seedRows(count: number): void {
       score = 6; // ONLY_DIRECTORY
     } else {
       tier = "B3";
-      score = 10; // NO_WEBSITE
+      score = 20; // NO_WEBSITE post FIX 7
     }
     insert.run(
       `p${i}`,

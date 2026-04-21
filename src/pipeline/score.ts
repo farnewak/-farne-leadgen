@@ -5,16 +5,28 @@ import type {
   SocialLinks,
 } from "../models/audit.js";
 
+// FIX 7 — market-weakness anchor. NO_WEBSITE must outrank every realistic
+// Tier-A record so that "no web presence at all" always sorts above any
+// in-market shop with degraded signals. Current realistic Tier-A maximum is
+// ≈14 (Phase 2A field samples), theoretical maximum is 19 (all Tier-A
+// positive weights summed). 20 leaves 6-point headroom; if a future penalty
+// lifts the Tier-A ceiling to >=19, raise this constant and re-document in
+// ARCHITECTURE_MAP.md > "Scoring rules". Exported so the property-based
+// test and assertExportInvariants can anchor on it directly.
+export const NO_WEBSITE_PENALTY = 20;
+
 // Signed weights. Positive = "worse web presence", negative = "actively good".
 // The clamp to [0, 30] at the bottom means best-case Tier-A sites floor at 0;
 // anything in the negative band is a strong signal to skip outreach entirely.
 export const SCORING_WEIGHTS = {
-  NO_WEBSITE: 10,
+  NO_WEBSITE: NO_WEBSITE_PENALTY,
   // Domain registered but only a parking page served. Ranked above
   // NO_WEBSITE/DEAD_WEBSITE because the owner already spent money on the
   // domain and signalled purchase intent. Replaces DEAD_WEBSITE for
-  // C-rows with intent_tier=PARKED (see scoreBreakdown below).
-  DOMAIN_REGISTERED_NO_SITE: 12,
+  // C-rows with intent_tier=PARKED (see scoreBreakdown below). Lifted
+  // alongside NO_WEBSITE in FIX 7 to preserve the PARKED > NO_WEBSITE
+  // business invariant.
+  DOMAIN_REGISTERED_NO_SITE: NO_WEBSITE_PENALTY + 2,
   DEAD_WEBSITE: 9,
   ONLY_SOCIAL: 7,
   ONLY_DIRECTORY: 6,

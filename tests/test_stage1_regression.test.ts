@@ -426,10 +426,10 @@ describe("stage1 regression lock", () => {
         "place_id": "osm:node:100000003",
         "plz": "1030",
         "psi_mobile_performance": null,
-        "score": 10,
+        "score": 20,
         "score_breakdown": [
           {
-            "delta": 10,
+            "delta": 20,
             "key": "NO_WEBSITE",
           },
         ],
