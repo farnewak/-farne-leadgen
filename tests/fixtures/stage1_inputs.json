@@ -110,5 +110,33 @@
     "phone": "+43 1 777 2020",
     "lat": 48.197,
     "lng": 16.344
+  },
+  {
+    "id": "R7a_dupe_url_highscore",
+    "placeId": "osm:node:100000009",
+    "name": "Café Kleinmeister Menu (A)",
+    "address": "Wipplingerstraße 14, 1010 Wien",
+    "plz": "1010",
+    "district": "Innere Stadt",
+    "types": ["amenity=cafe"],
+    "primaryType": "cafe",
+    "website": "https://kleinmeister-cafe.at/menu",
+    "phone": null,
+    "lat": 48.2105,
+    "lng": 16.3695
+  },
+  {
+    "id": "R7b_dupe_url_lowscore",
+    "placeId": "osm:node:100000010",
+    "name": "Café Kleinmeister Menu (B)",
+    "address": "Wipplingerstraße 14, 1010 Wien",
+    "plz": "1010",
+    "district": "Innere Stadt",
+    "types": ["amenity=cafe"],
+    "primaryType": "cafe",
+    "website": "https://www.kleinmeister-cafe.at/menu/?utm_source=flyer",
+    "phone": null,
+    "lat": 48.2105,
+    "lng": 16.3695
   }
 ]

@@ -20,6 +20,7 @@ import {
   type ChainBranchPattern,
 } from "./chain-filter.js";
 import { dedupeChainApices } from "./chain-apex-dedupe.js";
+import { dedupeByNormalizedUrl } from "./url-dedupe.js";
 import { resolve } from "node:path";
 import { discoverViaDns } from "./dns-probe.js";
 import { discoverViaCse } from "./cse-discovery.js";
@@ -152,12 +153,20 @@ export async function runAudit(options: AuditRunOptions = {}): Promise<void> {
     `apex dedupe: collapsed=${dedupe.collapsedGroups} branches dropped=${dedupe.droppedBranches} collapsed=${dedupe.collapsedBranches}`,
   );
 
+  // FIX 12: URL-level dedupe. Two rows reaching the same normalized URL
+  // (after stripping www., trailing /, utm_*, tracking params, fragment,
+  // and punycode-encoding IDN hosts) are collapsed to the highest-score
+  // row (ties broken by earliest audited_at). Runs AFTER chain-apex
+  // dedupe so apex collapses feed into URL dedupe rather than competing.
+  const urlDedupe = dedupeByNormalizedUrl(dedupe.survivors, { logDir });
+  log.info(`url dedupe: dropped=${urlDedupe.droppedCount}`);
+
   // Apply the --onlyTier flag at the final persist stage so dedupe sees
   // the full Tier-A population (an --onlyTier=B run still wants chain
   // filtering for the A rows it produces, not that it persists any).
   const finalRows = options.onlyTier
-    ? dedupe.survivors.filter((r) => r.tier === options.onlyTier)
-    : dedupe.survivors;
+    ? urlDedupe.survivors.filter((r) => r.tier === options.onlyTier)
+    : urlDedupe.survivors;
 
   for (const row of finalRows) {
     try {
