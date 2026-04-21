@@ -99,22 +99,116 @@ Two-stage chain-branch removal. Stage 1 (per-row, FIX 5) catches known chains by
 - **`src/pipeline/psi.ts`** — `runPsiMobile(url) → {performance, seo, accessibility, bestPractices, fetchedAt, error}`. PageSpeed Insights mobile strategy; rate-limited; error-typed.
 - **`src/pipeline/robots.ts`** — `getRobotsRules(origin) → {allowed(path)}`. Per-origin robots.txt cache. `AUDIT_RESPECT_ROBOTS_TXT=false` in tests.
 
-## Score computation + `score_breakdown` assembly
+## Scoring rules
 
-- **`src/pipeline/score.ts`** — the single source of truth for scoring.
-  - `SCORING_WEIGHTS` (const) — signed weights (-1 … +12); `NO_WEBSITE=10`, `DOMAIN_REGISTERED_NO_SITE=12`, `DEAD_WEBSITE=9`, `ONLY_SOCIAL=7`, `ONLY_DIRECTORY=6`, …, `HAS_STRUCTURED_DATA=-1`, `PSI_EXCELLENT=-1`.
-  - `scoreBreakdown(input: ScoreInput) → BreakdownEntry[]` — pure; ordered; for B1/B2/B3/C only the tier-bucket signal is emitted; for A every signal is evaluated.
-  - `computeScore(input) → number` — sum over breakdown, clamped to `[0, 30]`.
-  - `ScoreInput`, `BreakdownEntry`, `ScoreWeightKey` types.
-- **`src/pipeline/audit-row-builders.ts`** — `buildEmptyTierRow()`, `assembleAuditRow()`, `buildRobotsDisallowedRow()`, `emptyTechStack()`. Both row factories call `computeScore()` and attach the numeric `score`; the breakdown itself is **not** persisted — the exporter recomputes it via `rebuildScoreInput()`.
+The scoring module (`src/pipeline/score.ts`) is the single source of truth
+for how a lead's final numeric score is assembled. Keep this section in
+sync whenever a weight, threshold, or sub-classification rule changes.
+
+### Anchor: `NO_WEBSITE_PENALTY = 20`
+
+`NO_WEBSITE_PENALTY` is exported as a named constant so that the
+"no web presence at all" score always outranks every realistic Tier-A
+record. Phase 2A field samples showed real Tier-A scores peaking at
+≈14; the theoretical Tier-A maximum with every positive weight firing
+simultaneously is 19. The anchor at 20 therefore leaves **6 points of
+headroom** before the next tuning pass.
+
+`SCORING_WEIGHTS.NO_WEBSITE` mirrors `NO_WEBSITE_PENALTY` and
+`DOMAIN_REGISTERED_NO_SITE = NO_WEBSITE_PENALTY + 2 = 22` preserves the
+business invariant `PARKED > NO_WEBSITE` (the owner has demonstrated
+purchase intent by paying for the domain).
+
+**Refactor rule.** If a new penalty raises the Tier-A ceiling to ≥19
+(see catalogue below), raise `NO_WEBSITE_PENALTY` accordingly so the
+6-point headroom is preserved, then update this section and the
+anchor unit test that pins the literal value.
+
+### Penalty catalogue
+
+Tier-A penalties (additive; each signal independently present or absent):
+
+| Key                     | Weight | Trigger                                     |
+|-------------------------|-------:|---------------------------------------------|
+| `NO_SSL`                |   +3   | SSL cert invalid / not served               |
+| `NO_HTTPS_REDIRECT`     |   +2   | HTTP→HTTPS redirect missing                 |
+| `NO_MOBILE_VIEWPORT`    |   +3   | `<meta name=viewport>` absent               |
+| `PSI_POOR`              |   +3   | PSI mobile performance < 50                 |
+| `PSI_MEDIUM`            |   +1   | 50 ≤ PSI < 75                               |
+| `PSI_EXCELLENT`         |   -1   | PSI > 85 (signals no outreach need)         |
+| `NO_IMPRESSUM`          |   +3   | Impressum absent (exclusive w/ next)        |
+| `IMPRESSUM_INCOMPLETE`  |   +2   | Impressum present but fields missing        |
+| `NO_UID`                |   +1   | Impressum present, UID (ATU…) missing       |
+| `WIX_OR_JIMDO`          |   +2   | Budget-tier CMS detected                    |
+| `NO_ANALYTICS`          |   +1   | No analytics tag detected                   |
+| `NO_MODERN_TRACKING`    |   +1   | No pixel/conversion tracking detected       |
+| `NO_SOCIAL_LINKS`       |   +1   | No social-media links on home page          |
+| `HAS_STRUCTURED_DATA`   |   -1   | JSON-LD / microdata present (good signal)   |
+
+Tier-bucket penalties (for non-A tiers the bucket IS the signal — no
+signal-evaluation logic applies):
+
+| Key                          | Weight | Applies to                       |
+|------------------------------|-------:|----------------------------------|
+| `NO_WEBSITE`                 |   +20  | Tier B3                          |
+| `DOMAIN_REGISTERED_NO_SITE`  |   +22  | Tier C with `intent_tier=PARKED` |
+| `DEAD_WEBSITE`               |    +9  | Tier C (all other cases)         |
+| `ONLY_SOCIAL`                |    +7  | Tier B1                          |
+| `ONLY_DIRECTORY`             |    +6  | Tier B2                          |
+
+The final score is the sum over the emitted breakdown entries, clamped
+to `[0, 30]`. Realistic Tier-A maximum today: **≈14**. Theoretical
+Tier-A maximum: **19** (all positive weights; impressum-missing branch
+forbids `NO_UID`, so max-impressum contribution is 3 either way).
+
+### Sub-tier classification (`sub_tier`)
+
+Derived at export time via `computeSubTier(tier, score)` in
+`src/pipeline/score.ts`. Orthogonal to `tier`; persisted only on the
+export row, not on `audit_results` (schema migration deferred).
+
+| Sub-tier | Label           | Condition                          |
+|----------|-----------------|------------------------------------|
+| `A1`     | Katastrophe     | `tier='A'` ∧ `score ≥ 9`           |
+| `A2`     | Ausbaufähig     | `tier='A'` ∧ `5 ≤ score ≤ 8`       |
+| `A3`     | Eh ok           | `tier='A'` ∧ `score ≤ 4`           |
+| `null`   | —               | Non-A tier OR null score           |
+
+### Email classification (`email_is_generic`)
+
+Three-valued, derived at export time via `classifyEmailGeneric(email)`
+in `src/pipeline/email-classify.ts`. Replaces the old always-false
+`genericEmails.includes(email)` check.
+
+| Value    | Meaning                                                  |
+|----------|----------------------------------------------------------|
+| `null`   | No email discovered                                      |
+| `1`      | Local-part matches generic role (info@, office@, büro@, …) |
+| `0`      | Personal or otherwise non-role mailbox                   |
+
+Matching is case-insensitive and German/Austrian Unicode-folded
+(`ä→ae`, `ö→oe`, `ü→ue`, `ß→ss`) so `büro@` and `buero@` are
+equivalent. Numeric suffixes ("info2@", "team3@") still classify as
+generic. Role set covers international defaults (info, office, hello,
+support, …) plus AT-specific roles (buero, kanzlei, praxis,
+ordination, rezeption, empfang, anfrage, office1).
+
+### Module layout
+
+- **`src/pipeline/score.ts`** — `SCORING_WEIGHTS`, `NO_WEBSITE_PENALTY`, `scoreBreakdown()`, `computeScore()`, `computeSubTier()`. Pure; no I/O.
+- **`src/pipeline/email-classify.ts`** — `classifyEmailGeneric()`. Pure; role set is an internal `Set<string>`.
+- **`src/pipeline/audit-row-builders.ts`** — `buildEmptyTierRow()`, `assembleAuditRow()`, `buildRobotsDisallowedRow()`. Call `computeScore()` and attach the numeric score; breakdown is **not** persisted — the exporter recomputes it.
 - **`src/pipeline/audit.ts`** — `buildTierARow()` calls `computeScore()` once per Tier-A candidate.
 - **Export-time `score_breakdown` assembly** — `src/pipeline/export.ts`:
   - `rowToExportShape(row, opts)` — reads the persisted audit row, calls `assertExportInvariants(row)` first, then rebuilds `ScoreInput` via `rebuildScoreInput()`, calls `scoreBreakdown()`, compares the sum against the stored `row.score`. `ExportRow.score` is typed `number | null`; `filterRows` drops null-score rows and `sortRows` sinks them with `-Infinity`.
-  - `assertExportInvariants(row)` (FIX 3) — four hard throws on inconsistent persisted state:
+  - `assertExportInvariants(row)` (FIX 3 + FIX 6 + FIX 8 + FIX 9) — hard throws on inconsistent persisted state:
     1. score non-null → tier non-null
     2. intent_tier non-null → score non-null (unless intent_tier ∈ `AUDIT_ERROR_INTENT_TIERS = {AUDIT_ERROR, TIMEOUT}`)
-    3. tier='C' → intent_tier ∈ `TIER_C_ALLOWED_INTENT_TIERS = {null, AUDIT_ERROR, TIMEOUT, PARKED}` (DEAD on a C-row throws — DEAD lives on B3 post-FIX-4, PARKED is the only C-bucket intent with a numeric score)
-    4. tier='C' with a null/error intent_tier → score must be null. FIX 3 removed the earlier `row.score ?? recomputed` fallback so this invariant actually fires instead of being silently papered over.
+    3. tier='C' → intent_tier ∈ `TIER_C_ALLOWED_INTENT_TIERS = {null, AUDIT_ERROR, TIMEOUT, PARKED}`
+    4. tier='C' with null/error intent_tier → score must be null
+    5. `chain_detected=true` ⇒ `chain_name` non-null ∧ `branch_count ≥ 2`; `chain_detected=false` ⇒ `chain_name=null` ∧ `branch_count=1`
+    6. `sub_tier ∈ {A1,A2,A3}` ⇒ `tier='A'`; `tier='A'` with non-null score ⇒ `sub_tier ≠ null`
+    7. `email_is_generic ∈ {0,1}` ⇒ email non-null; `email_is_generic=null` ⇒ email null (or malformed without `@`)
   - `HAS_STRUCTURED_DATA` inference block: since this signal is *not* persisted on `audit_results`, a gap of exactly `+1` between recomputed and stored score injects a synthetic `{key:"HAS_STRUCTURED_DATA", delta:-1}` entry. Any other non-zero gap emits a WARN.
   - See open-work-items #22 in `CLAUDE.md`.
 
